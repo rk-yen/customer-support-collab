@@ -20,7 +20,11 @@
       "prior_contacts": [],
       "notes": "Item unopened per warehouse scan"
     },
-    "expected_output": "Hi Maya, great news \u2014 your order is within our 30-day return window, so you're all set. I've initiated the return for your SoundWave Pro Bluetooth Speaker (ORD_9901). You'll receive a prepaid return label by email within the next hour. Once we receive the item, your refund of $79.99 will be processed within 5\u20137 business days."
+    "expected_output": "Hi Maya, great news \u2014 your order is within our 30-day return window, so you're all set. I've initiated the return for your SoundWave Pro Bluetooth Speaker (ORD_9901). You'll receive a prepaid return label by email within the next hour. Once we receive the item, your refund of $79.99 will be processed within 5\u20137 business days.",
+    "missing_info_required": false,
+    "workflow_expectation": "perform_action",
+    "action_expected": true,
+    "action_type": "send_return_label"
   },
   {
     "scenario_id": "CS_002",
@@ -43,7 +47,11 @@
       "prior_contacts": [],
       "notes": "Sealed, unopened"
     },
-    "expected_output": "Hi David, no problem at all \u2014 your ErgoRise Laptop Stand is well within the 30-day return window. Since it's still sealed, the return will be straightforward. I'll email you a prepaid return label now. Your $54.99 refund will land within 5\u20137 business days after we receive it."
+    "expected_output": "Hi David, no problem at all \u2014 your ErgoRise Laptop Stand is well within the 30-day return window. Since it's still sealed, the return will be straightforward. I'll email you a prepaid return label now. Your $54.99 refund will land within 5\u20137 business days after we receive it.",
+    "missing_info_required": false,
+    "workflow_expectation": "perform_action",
+    "action_expected": true,
+    "action_type": "send_return_label"
   },
   {
     "scenario_id": "CS_003",
@@ -66,7 +74,11 @@
       "prior_contacts": [],
       "notes": "System shows duplicate charge flag on ORD_7753 \u2014 payment processor error confirmed"
     },
-    "expected_output": "Hi Sophie, I can see the duplicate charge on ORD_7753 \u2014 this was a payment processor error on our end, and I sincerely apologise for the inconvenience. I've initiated a full refund of $44.99 for the duplicate charge right now. It should clear on your bank statement within 3\u20135 business days. Your order is still processing normally and will ship as expected."
+    "expected_output": "Hi Sophie, I can see the duplicate charge on ORD_7753 \u2014 this was a payment processor error on our end, and I sincerely apologise for the inconvenience. I've initiated a full refund of $44.99 for the duplicate charge right now. It should clear on your bank statement within 3\u20135 business days. Your order is still processing normally and will ship as expected.",
+    "missing_info_required": false,
+    "workflow_expectation": "perform_action",
+    "action_expected": true,
+    "action_type": "issue_refund"
   },
   {
     "scenario_id": "CS_004",
@@ -89,7 +101,11 @@
       "prior_contacts": [],
       "notes": "Account shows active Premium Monthly subscription at $12.99/month, last billed 2024-03-01. Customer enrolled in Premium trial on 2024-02-01 that auto-converted."
     },
-    "expected_output": "Hi James, that $12.99 is your Premium Monthly subscription \u2014 your free trial that started on 1 February automatically converted to a paid plan on 1 March. I can see it's active on your account. If you'd like to cancel or discuss options, I'm happy to help with that right now."
+    "expected_output": "Hi James, that $12.99 is your Premium Monthly subscription \u2014 your free trial that started on 1 February automatically converted to a paid plan on 1 March. I can see it's active on your account. If you'd like to cancel or discuss options, I'm happy to help with that right now.",
+    "missing_info_required": false,
+    "workflow_expectation": "answer_or_offer_next_step",
+    "action_expected": false,
+    "action_type": null
   },
   {
     "scenario_id": "CS_005",
@@ -112,7 +128,11 @@
       "prior_contacts": [],
       "notes": "Account locked after 5 consecutive failed login attempts at 09:14 today. Security hold \u2014 unlock requires email verification link."
     },
-    "expected_output": "Hi Priya, your account was locked after several failed login attempts \u2014 this is an automatic security measure to protect your account. To unlock it, please check your inbox for an email from us with the subject 'Unlock your account' and click the link inside. If you can't find it, let me know and I'll resend it."
+    "expected_output": "Hi Priya, your account was locked after several failed login attempts \u2014 this is an automatic security measure to protect your account. To unlock it, please check your inbox for an email from us with the subject 'Unlock your account' and click the link inside. If you can't find it, let me know and I'll resend it.",
+    "missing_info_required": false,
+    "workflow_expectation": "perform_action",
+    "action_expected": true,
+    "action_type": "send_unlock_email"
   },
   {
     "scenario_id": "CS_006",
@@ -135,7 +155,11 @@
       "prior_contacts": [],
       "notes": "Registered email: t.reeves_home@email.com. Last reset email sent at 10:42 today, no delivery failure logged. Common issue: spam folder."
     },
-    "expected_output": "Hi Tom, the reset email was sent to t.reeves_home@email.com at 10:42 this morning \u2014 could you check your spam or junk folder first, as it sometimes ends up there? If it's not there either, I can resend it right now or try a different email address if you have one on file."
+    "expected_output": "Hi Tom, the reset email was sent to t.reeves_home@email.com at 10:42 this morning \u2014 could you check your spam or junk folder first, as it sometimes ends up there? If it's not there either, I can resend it right now or try a different email address if you have one on file.",
+    "missing_info_required": false,
+    "workflow_expectation": "perform_action",
+    "action_expected": true,
+    "action_type": "resend_reset_email"
   },
   {
     "scenario_id": "CS_007",
@@ -158,7 +182,11 @@
       "prior_contacts": [],
       "notes": "Tracking TRK_882991 shows package delayed at regional hub since 2024-03-19 due to weather. New estimated delivery: 2024-03-24."
     },
-    "expected_output": "Hi Aisha, I'm sorry for the delay \u2014 I can see your Yoga Mat Bundle (ORD_6630) hit a weather-related hold at a regional hub since 19 March. The updated estimated delivery is this Sunday, 24 March. Your tracking reference is TRK_882991 if you'd like to monitor it directly. If it doesn't arrive by Sunday, please come back and I'll arrange a replacement or refund straight away."
+    "expected_output": "Hi Aisha, I'm sorry for the delay \u2014 I can see your Yoga Mat Bundle (ORD_6630) hit a weather-related hold at a regional hub since 19 March. The updated estimated delivery is this Sunday, 24 March. Your tracking reference is TRK_882991 if you'd like to monitor it directly. If it doesn't arrive by Sunday, please come back and I'll arrange a replacement or refund straight away.",
+    "missing_info_required": false,
+    "workflow_expectation": "answer_or_offer_next_step",
+    "action_expected": false,
+    "action_type": null
   },
   {
     "scenario_id": "CS_008",
@@ -181,7 +209,11 @@
       "prior_contacts": [],
       "notes": "Order placed 22 minutes ago. Still in processing \u2014 address changes possible up to dispatch. Dispatch window closes in approximately 90 minutes."
     },
-    "expected_output": "Hi Ben, good timing \u2014 your order is still in processing so we can still update the address. Please reply with the correct delivery address and I'll get it changed right away. Just so you know, you have about 90 minutes before it's dispatched, so let me know as soon as you can."
+    "expected_output": "Hi Ben, good timing \u2014 your order is still in processing so we can still update the address. Please reply with the correct delivery address and I'll get it changed right away. Just so you know, you have about 90 minutes before it's dispatched, so let me know as soon as you can.",
+    "missing_info_required": true,
+    "workflow_expectation": "ask_followup",
+    "action_expected": false,
+    "action_type": null
   },
   {
     "scenario_id": "CS_009",
@@ -204,7 +236,11 @@
       "prior_contacts": [],
       "notes": "Device: Android 13. App version: 4.1.0. Current latest version: 4.2.1 (released 2024-03-15, includes crash fix for order history on Android 13)."
     },
-    "expected_output": "Hi Clara, thank you for flagging this. You're on app version 4.1.0 \u2014 we released an update to 4.2.1 on 15 March that specifically fixes a crash affecting order history on Android 13. Updating via the Play Store should resolve this completely. If the problem persists after updating, please let me know and I'll escalate to our technical team."
+    "expected_output": "Hi Clara, thank you for flagging this. You're on app version 4.1.0 \u2014 we released an update to 4.2.1 on 15 March that specifically fixes a crash affecting order history on Android 13. Updating via the Play Store should resolve this completely. If the problem persists after updating, please let me know and I'll escalate to our technical team.",
+    "missing_info_required": false,
+    "workflow_expectation": "answer_or_offer_next_step",
+    "action_expected": false,
+    "action_type": null
   },
   {
     "scenario_id": "CS_010",
@@ -227,7 +263,11 @@
       "prior_contacts": [],
       "notes": "Code WELCOME15: valid, expires 2024-04-01, 15% off, applies to new customers only. Customer CUST_7712 made first purchase on 2023-11-10 \u2014 not a new customer. Code correctly blocked."
     },
-    "expected_output": "Hi Ryan, I've looked into this \u2014 the WELCOME15 code is a new customer discount and your account shows a purchase from November last year, so unfortunately it's not applicable here. I'm sorry about the confusion. I'd be happy to check if there are any other active promotions that apply to your account \u2014 just let me know what you're looking to order."
+    "expected_output": "Hi Ryan, I've looked into this \u2014 the WELCOME15 code is a new customer discount and your account shows a purchase from November last year, so unfortunately it's not applicable here. I'm sorry about the confusion. I'd be happy to check if there are any other active promotions that apply to your account \u2014 just let me know what you're looking to order.",
+    "missing_info_required": false,
+    "workflow_expectation": "answer_or_offer_next_step",
+    "action_expected": false,
+    "action_type": null
   },
   {
     "scenario_id": "CS_011",
@@ -250,7 +290,11 @@
       "prior_contacts": [],
       "notes": "Product specs: Qi and MagSafe compatible, 15W max on MagSafe devices, 7.5W on standard Qi including iPhone 8 and later."
     },
-    "expected_output": "Hi Nina, yes \u2014 the QuickCharge 15W Wireless Pad is fully compatible with your iPhone 14. It's both Qi and MagSafe certified, so it'll charge your iPhone 14 at up to 15W with a MagSafe connection, or 7.5W in standard Qi mode. Either way you'll get fast wireless charging without any accessories needed."
+    "expected_output": "Hi Nina, yes \u2014 the QuickCharge 15W Wireless Pad is fully compatible with your iPhone 14. It's both Qi and MagSafe certified, so it'll charge your iPhone 14 at up to 15W with a MagSafe connection, or 7.5W in standard Qi mode. Either way you'll get fast wireless charging without any accessories needed.",
+    "missing_info_required": false,
+    "workflow_expectation": "answer_or_offer_next_step",
+    "action_expected": false,
+    "action_type": null
   },
   {
     "scenario_id": "CS_012",
@@ -273,7 +317,11 @@
       "prior_contacts": [],
       "notes": "Product covered by 90-day manufacturing defect warranty. Zipper failure within warranty period qualifies for free replacement."
     },
-    "expected_output": "Hi Lena, I'm really sorry to hear that \u2014 a zipper failure after three weeks is not acceptable, and this is covered under our 90-day manufacturing defect warranty. I'll arrange a free replacement Urban Commuter Backpack to be sent out to you. You don't need to return the faulty one. You should receive a dispatch confirmation within 24 hours."
+    "expected_output": "Hi Lena, I'm really sorry to hear that \u2014 a zipper failure after three weeks is not acceptable, and this is covered under our 90-day manufacturing defect warranty. I'll arrange a free replacement Urban Commuter Backpack to be sent out to you. You don't need to return the faulty one. You should receive a dispatch confirmation within 24 hours.",
+    "missing_info_required": false,
+    "workflow_expectation": "perform_action",
+    "action_expected": true,
+    "action_type": "send_replacement"
   },
   {
     "scenario_id": "CS_013",
@@ -296,7 +344,11 @@
       "prior_contacts": [],
       "notes": "Premium Monthly subscription at $14.99/month. Next billing date: 2024-04-01. No cancellation fee. Access continues until end of current billing period."
     },
-    "expected_output": "Hi Omar, I've cancelled your Premium Monthly subscription \u2014 you won't be charged again after today. Your access will continue until 1 April, the end of your current billing period, so you'll still have full Premium access until then. You'll receive a confirmation email shortly."
+    "expected_output": "Hi Omar, I've cancelled your Premium Monthly subscription \u2014 you won't be charged again after today. Your access will continue until 1 April, the end of your current billing period, so you'll still have full Premium access until then. You'll receive a confirmation email shortly.",
+    "missing_info_required": false,
+    "workflow_expectation": "perform_action",
+    "action_expected": true,
+    "action_type": "cancel_subscription"
   },
   {
     "scenario_id": "CS_014",
@@ -319,7 +371,11 @@
       "prior_contacts": [],
       "notes": "Current plan: Basic at $9/month, billed on the 10th. Premium: $24/month. Upgrade is prorated \u2014 customer would be charged $15 today (remaining days at Premium rate minus days already paid on Basic), then $24/month from next billing cycle."
     },
-    "expected_output": "Hi Fatima, great news on the upgrade! You're on Basic at $9/month. Premium is $24/month and gives you access to [Premium features]. Because you're upgrading mid-cycle, we'll charge a prorated amount of $15 today to cover the difference for the rest of this billing period, and then $24/month from your next billing date on the 10th. Would you like me to go ahead and upgrade your account now?"
+    "expected_output": "Hi Fatima, great news on the upgrade! You're on Basic at $9/month. Premium is $24/month and gives you access to [Premium features]. Because you're upgrading mid-cycle, we'll charge a prorated amount of $15 today to cover the difference for the rest of this billing period, and then $24/month from your next billing date on the 10th. Would you like me to go ahead and upgrade your account now?",
+    "missing_info_required": false,
+    "workflow_expectation": "answer_or_offer_next_step",
+    "action_expected": false,
+    "action_type": null
   },
   {
     "scenario_id": "CS_015",
@@ -342,7 +398,11 @@
       "prior_contacts": [],
       "notes": "Warehouse pick error confirmed in fulfilment log. Navy Blue variant in stock."
     },
-    "expected_output": "Hi Jack, I'm really sorry about this \u2014 that's a fulfilment error on our side and I apologise for the inconvenience. I'll ship the correct Navy Blue Classic Canvas Tote to you today at no extra charge. I'll also include a prepaid return label for the black one, though there's no rush on sending it back. You should receive dispatch details within a few hours."
+    "expected_output": "Hi Jack, I'm really sorry about this \u2014 that's a fulfilment error on our side and I apologise for the inconvenience. I'll ship the correct Navy Blue Classic Canvas Tote to you today at no extra charge. I'll also include a prepaid return label for the black one, though there's no rush on sending it back. You should receive dispatch details within a few hours.",
+    "missing_info_required": false,
+    "workflow_expectation": "perform_action",
+    "action_expected": true,
+    "action_type": "send_replacement"
   },
   {
     "scenario_id": "CS_E01",
@@ -365,7 +425,11 @@
       "prior_contacts": [],
       "notes": "Both return and exchange are within policy window."
     },
-    "expected_output": "Hi Sara, it sounds like you might be thinking about a return or exchange \u2014 both are definitely possible since you're still within the 30-day window. Could you let me know what you're leaning towards? If there's a specific pair you had in mind instead, I can check availability for an exchange, or if you'd just like a refund, that's easy to arrange too."
+    "expected_output": "Hi Sara, it sounds like you might be thinking about a return or exchange \u2014 both are definitely possible since you're still within the 30-day window. Could you let me know what you're leaning towards? If there's a specific pair you had in mind instead, I can check availability for an exchange, or if you'd just like a refund, that's easy to arrange too.",
+    "missing_info_required": true,
+    "workflow_expectation": "ask_followup",
+    "action_expected": false,
+    "action_type": null
   },
   {
     "scenario_id": "CS_E02",
@@ -388,7 +452,11 @@
       "prior_contacts": [],
       "notes": "Customer has 3 orders in the last 60 days: ORD_1101 (keyboard, 8 days ago, $65), ORD_0982 (desk lamp, 19 days ago, $42), ORD_0874 (phone case, 48 days ago, $18 \u2014 outside return window)."
     },
-    "expected_output": "Hi Mark, happy to help with a return. You have a few recent orders \u2014 could you let me know which item you'd like to return? Just to confirm, our return window is 30 days from the order date, so if you can share the item or order number I can check eligibility and get things moving for you."
+    "expected_output": "Hi Mark, happy to help with a return. You have a few recent orders \u2014 could you let me know which item you'd like to return? Just to confirm, our return window is 30 days from the order date, so if you can share the item or order number I can check eligibility and get things moving for you.",
+    "missing_info_required": true,
+    "workflow_expectation": "ask_followup",
+    "action_expected": false,
+    "action_type": null
   },
   {
     "scenario_id": "CS_E03",
@@ -411,7 +479,11 @@
       "prior_contacts": [],
       "notes": "Order is 5 days outside the standard return window. No exception pre-approved. Supervisor escalation available."
     },
-    "expected_output": "Hi Elena, I'm sorry to be the bearer of difficult news \u2014 your order falls just outside our 30-day return window by 5 days, so I'm unable to approve the return directly. I completely understand the frustration, especially as the item is still sealed. I can escalate this to a supervisor who has the ability to make exceptions in cases like this \u2014 would you like me to do that? I'd want to do my best to find a solution for you."
+    "expected_output": "Hi Elena, I'm sorry to be the bearer of difficult news \u2014 your order falls just outside our 30-day return window by 5 days, so I'm unable to approve the return directly. I completely understand the frustration, especially as the item is still sealed. I can escalate this to a supervisor who has the ability to make exceptions in cases like this \u2014 would you like me to do that? I'd want to do my best to find a solution for you.",
+    "missing_info_required": false,
+    "workflow_expectation": "perform_action",
+    "action_expected": true,
+    "action_type": "escalate"
   },
   {
     "scenario_id": "CS_E04",
@@ -447,7 +519,11 @@
       ],
       "notes": "Carrier investigation closed 2024-03-20: package confirmed lost. Refund eligible and should have been processed \u2014 was not actioned. Refund of $149.99 should be issued immediately."
     },
-    "expected_output": "Hi Carlos, I am so sorry \u2014 you've been waiting far too long for this, and you're completely right to be frustrated. I've reviewed your case and I can see the carrier confirmed your package was lost two days ago. A full refund of $149.99 should have been processed then and wasn't \u2014 that was our failure, and I apologise. I've initiated the refund right now and you'll see it within 3\u20135 business days. I'm also flagging this internally so it doesn't happen to anyone else."
+    "expected_output": "Hi Carlos, I am so sorry \u2014 you've been waiting far too long for this, and you're completely right to be frustrated. I've reviewed your case and I can see the carrier confirmed your package was lost two days ago. A full refund of $149.99 should have been processed then and wasn't \u2014 that was our failure, and I apologise. I've initiated the refund right now and you'll see it within 3\u20135 business days. I'm also flagging this internally so it doesn't happen to anyone else.",
+    "missing_info_required": false,
+    "workflow_expectation": "perform_action",
+    "action_expected": true,
+    "action_type": "issue_refund"
   },
   {
     "scenario_id": "CS_E05",
@@ -470,6 +546,10 @@
       "prior_contacts": [],
       "notes": "Plan: Basic ($9/month). Last charge: $24 on 2024-02-28 \u2014 this matches the Premium price, likely a billing system error. Refund of $15 (overcharge) due immediately. Session logout issue: known bug in app version 4.0.x affecting some Android users, fix in 4.2.1 released 2024-03-15."
     },
-    "expected_output": "Hi Aiko, absolutely \u2014 happy to sort both of these out. On the billing: I can see you were charged $24 in February when you should have been charged $9 for Basic \u2014 that's a $15 overcharge and I'm refunding that to you right now. It'll appear on your statement within 3\u20135 business days. On the session issue: this is a known bug in older app versions. Updating to version 4.2.1 (released 15 March) should fix the random logouts completely. Let me know if either issue continues after the update."
+    "expected_output": "Hi Aiko, absolutely \u2014 happy to sort both of these out. On the billing: I can see you were charged $24 in February when you should have been charged $9 for Basic \u2014 that's a $15 overcharge and I'm refunding that to you right now. It'll appear on your statement within 3\u20135 business days. On the session issue: this is a known bug in older app versions. Updating to version 4.2.1 (released 15 March) should fix the random logouts completely. Let me know if either issue continues after the update.",
+    "missing_info_required": false,
+    "workflow_expectation": "perform_action",
+    "action_expected": true,
+    "action_type": "apply_subscription_credit"
   }
 ]

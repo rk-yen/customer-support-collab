@@ -5,119 +5,14 @@ import pandas as pd
 from arize import ArizeClient
 
 from workshop_helpers.backend import TOOLS, hydrate_backend_from_dataset, run_support_agent_threadsafe
-from workshop_helpers.metrics import build_evaluators
+from workshop_helpers.metrics import build_evaluators, pack_response_payload
 
 DATASET_NAME = "cs-support-workshop-benchmark"
 
-WORKSHOP_BENCHMARK_CONFIG = {
-    "CS_E02": {
-        "benchmark_slice": "prompt",
-        "expected_behavior": "ask_one_targeted_followup",
-        "v2_snapshot": {
-            "customer_name": "Mark Davies",
-            "customer_id": "CUST_3392",
-            "account_status": "active",
-        },
-    },
-    "CS_008": {
-        "benchmark_slice": "prompt",
-        "expected_behavior": "ask_one_targeted_followup",
-        "v2_snapshot": {
-            "customer_name": "Ben Hartley",
-            "customer_id": "CUST_9920",
-            "order_id": "ORD_5517",
-            "order_status": "processing",
-        },
-    },
-    "CS_004": {
-        "benchmark_slice": "context",
-        "expected_behavior": "answer_with_specific_context_no_action_claim",
-        "v2_snapshot": {
-            "customer_name": "James Okafor",
-            "customer_id": "CUST_2290",
-            "account_status": "active",
-            "subscription_plan": "Premium Monthly",
-            "subscription_price": 12.99,
-            "last_billed": "2024-03-01",
-            "subscription_origin": "trial auto-converted",
-        },
-    },
-    "CS_007": {
-        "benchmark_slice": "context",
-        "expected_behavior": "answer_with_specific_context_no_action_claim",
-        "v2_snapshot": {
-            "customer_name": "Aisha Nguyen",
-            "customer_id": "CUST_1145",
-            "order_id": "ORD_6630",
-            "product_name": "Yoga Mat Bundle",
-            "order_status": "in_transit",
-            "tracking": "TRK_882991",
-            "estimated_delivery": "2024-03-24",
-            "delay_reason": "weather hold at regional hub",
-        },
-    },
-    "CS_009": {
-        "benchmark_slice": "context",
-        "expected_behavior": "answer_with_specific_context_no_action_claim",
-        "v2_snapshot": {
-            "customer_name": "Clara Johansson",
-            "customer_id": "CUST_3388",
-            "device": "Android 13",
-            "app_version": "4.1.0",
-            "latest_app_version": "4.2.1",
-            "known_fix": "4.2.1 fixes order history crash on Android 13",
-        },
-    },
-    "CS_011": {
-        "benchmark_slice": "context",
-        "expected_behavior": "answer_with_specific_context_no_action_claim",
-        "v2_snapshot": {
-            "customer_name": "Nina Kowalski",
-            "customer_id": "CUST_4409",
-            "product_name": "QuickCharge 15W Wireless Pad",
-            "compatible_with": ["iPhone 8 and later", "all Android Qi devices"],
-            "magsafe_compatible": True,
-            "max_wattage_magsafe": 15,
-            "max_wattage_qi": 7.5,
-        },
-    },
-    "CS_003": {
-        "benchmark_slice": "tools",
-        "expected_behavior": "confirm_backend_action_taken",
-        "v2_snapshot": {
-            "customer_name": "Sophie Williams",
-            "customer_id": "CUST_6614",
-            "order_id": "ORD_7753",
-            "product_name": "Ceramic Pour-Over Coffee Set",
-            "order_status": "processing",
-            "reported_issue": "customer reports duplicate charge",
-        },
-    },
-    "CS_015": {
-        "benchmark_slice": "tools",
-        "expected_behavior": "confirm_backend_action_taken",
-        "v2_snapshot": {
-            "customer_name": "Jack Morrison",
-            "customer_id": "CUST_5540",
-            "order_id": "ORD_3318",
-            "product_name": "Classic Canvas Tote - Navy Blue",
-            "order_status": "delivered",
-            "reported_issue": "customer says the wrong colour arrived",
-        },
-    },
-    "CS_E04": {
-        "benchmark_slice": "tools",
-        "expected_behavior": "confirm_backend_action_taken",
-        "v2_snapshot": {
-            "customer_name": "Carlos Mendez",
-            "customer_id": "CUST_9934",
-            "order_id": "ORD_7701",
-            "product_name": "Smart Home Starter Kit",
-            "order_status": "lost_in_transit",
-            "prior_contacts": 3,
-            "reported_issue": "customer is demanding a refund for a missing package",
-        },
-    },
+VARIANT_BEHAVIORS = {
+    "v1": "Prompt-only assistant with no backend access. It should avoid bluffing, avoid invented actions, and ask one or more focused follow-ups when information is missing.",
+    "v2": "Static-context assistant. It should use the provided support snapshot specifically, but it must not pretend a backend action already happened.",
+    "v3": "Tool-using agent. When enough information exists, it should verify with tools and complete the backend action before replying.",
 }
 
 
@@ -125,16 +20,10 @@ def dataset_index(dataset: list[dict]) -> dict:
     return {case["scenario_id"]: case for case in dataset}
 
 
-def build_workshop_benchmark(dataset: list[dict]) -> list[dict]:
-    indexed = dataset_index(dataset)
-    benchmark = []
-    for scenario_id, metadata in WORKSHOP_BENCHMARK_CONFIG.items():
-        case = dict(indexed[scenario_id])
-        case["benchmark_slice"] = metadata["benchmark_slice"]
-        case["expected_behavior"] = metadata["expected_behavior"]
-        case["v2_snapshot"] = metadata["v2_snapshot"]
-        benchmark.append(case)
-    return benchmark
+def select_cases(dataset: list[dict], limit_n: int | None = None) -> list[dict]:
+    if limit_n is None:
+        return list(dataset)
+    return list(dataset[:limit_n])
 
 
 def summarize_dataset(dataset: list[dict]) -> dict:
@@ -146,13 +35,7 @@ def summarize_dataset(dataset: list[dict]) -> dict:
     if "is_edge_case" in frame.columns:
         summary["standard_count"] = int(frame[~frame.is_edge_case].shape[0])
         summary["edge_case_count"] = int(frame[frame.is_edge_case].shape[0])
-    if "benchmark_slice" in frame.columns:
-        summary["slice_counts"] = frame["benchmark_slice"].value_counts().sort_index().to_dict()
     return summary
-
-
-def build_v2_support_snapshot(case: dict) -> dict:
-    return dict(case.get("v2_snapshot") or WORKSHOP_BENCHMARK_CONFIG.get(case["scenario_id"], {}).get("v2_snapshot", {}))
 
 
 def build_arize_dataframe(dataset: list[dict]) -> pd.DataFrame:
@@ -161,8 +44,6 @@ def build_arize_dataframe(dataset: list[dict]) -> pd.DataFrame:
             {
                 "scenario_id": case["scenario_id"],
                 "category": case["category"],
-                "benchmark_slice": case["benchmark_slice"],
-                "expected_behavior": case["expected_behavior"],
                 "customer_id": case["source_data"].get("customer_id", ""),
                 "user_input": case["user_input"],
                 "expected_output": case["expected_output"],
@@ -213,15 +94,14 @@ def build_tasks(client, dataset: list[dict], prompt_v1: str, prompt_v2: str, pro
             temperature=0.3,
             max_tokens=220,
         )
-        return response.choices[0].message.content.strip()
+        return pack_response_payload(response.choices[0].message.content.strip())
 
     def task_v2(row: dict) -> str:
         case = cases_by_id.get(row["scenario_id"])
         if not case:
             return "Error: case not found"
-        support_snapshot = build_v2_support_snapshot(case)
         message = (
-            f"Customer context (internal support snapshot):\n{json.dumps(support_snapshot, indent=2)}"
+            f"Customer context (internal support snapshot):\n{json.dumps(case['source_data'], indent=2)}"
             f"\n\nCustomer message:\n{row['user_input']}"
         )
         response = client.chat.completions.create(
@@ -233,15 +113,20 @@ def build_tasks(client, dataset: list[dict], prompt_v1: str, prompt_v2: str, pro
             temperature=0.3,
             max_tokens=220,
         )
-        return response.choices[0].message.content.strip()
+        return pack_response_payload(response.choices[0].message.content.strip())
 
     def task_v3(row: dict) -> str:
-        return run_support_agent_threadsafe(
+        result = run_support_agent_threadsafe(
             customer_message=row["user_input"],
             authenticated_customer_id=row.get("customer_id") or "UNKNOWN",
             instructions=prompt_v3.format(
                 authenticated_customer_id=row.get("customer_id") or "UNKNOWN"
             ),
+        )
+        return pack_response_payload(
+            result["output"],
+            tool_calls=result.get("tool_calls", []),
+            action_calls=result.get("action_calls", []),
         )
 
     return {"task_v1": task_v1, "task_v2": task_v2, "task_v3": task_v3}
@@ -261,21 +146,20 @@ def run_experiment(arize_client, dataset_id: str, name_prefix: str, task, evalua
 
 def production_readiness_checklist() -> list[tuple[str, str, str]]:
     return [
-        ("correct_outcome >= 80% on tools slice", "check v3 benchmark in Arize", "tool-using agent should outperform static context on operational cases"),
-        ("workflow_fit >= 80% on all slices", "check slice filters in Arize", "prompt, context, and tools should each behave as designed"),
-        ("tone Good or Acceptable >= 85%", "check all three variants", "tone is a guardrail, not the main success metric"),
+        ("correct_outcome improves from v1 to v3", "check experiment comparison", "agents should outperform prompt-only assistance on the same case set"),
+        ("workflow_fit improves from v1 to v3", "check experiment comparison", "each variant should behave like its intended capability stage"),
+        ("tone Good or Acceptable stays high", "check all three variants", "tone is a guardrail, not the main success metric"),
         ("human review gate before response sent to customer", "not yet designed", "required for v1: agent drafts, human approves"),
-        ("guardrail for escalation-required cases", "take_action(escalate) returns a ticket", "verify downstream escalation workflow is real"),
-        ("tool coverage matches benchmark cases", "yes for workshop subset", "expand only after the story is clear"),
-        ("sampling plan: outputs reviewed per week, by whom", "not defined", "recommended: 30 benchmark rechecks per prompt change"),
-        ("threshold to advance from demo to pilot", "not defined", "suggested: strong tools-slice performance plus stable tone guardrail"),
+        ("tool-driven actions correspond to real downstream workflows", "stubbed in demo backend", "verify this before any real pilot"),
+        ("sample size is appropriate for the workshop runtime", "configurable via LIMIT_N_CASES", "smaller runs are faster but noisier"),
+        ("threshold to advance from demo to pilot", "not defined", "set based on stable outcome and workflow-fit performance"),
     ]
 
 
 def format_checklist_rows(checklist: list[tuple[str, str, str]]) -> list[str]:
     rows = [f"{'#':<3} {'CRITERION':<44} {'STATUS':<34} NOTE", "-" * 118]
     for index, (criterion, status, note) in enumerate(checklist, start=1):
-        icon = "OK" if any(word in status.lower() for word in ["yes", "check", "returns"]) else "--"
+        icon = "OK" if any(word in status.lower() for word in ["check", "configurable", "stubbed"]) else "--"
         rows.append(f"{icon} {index:<2} {criterion:<44} {status:<34} {note}")
     return rows
 
@@ -288,14 +172,23 @@ def prepare_experiment_bundle(
     prompt_v1: str,
     prompt_v2: str,
     prompt_v3: str,
+    limit_n: int | None = None,
 ) -> dict:
+    selected_dataset = select_cases(dataset, limit_n=limit_n)
     hydrate_backend_from_dataset(dataset)
-    dataset_lookup = dataset_index(dataset)
-    arize_bundle = ensure_arize_dataset(arize_api_key, arize_space_id, dataset)
+    dataset_lookup = dataset_index(selected_dataset)
+    arize_bundle = ensure_arize_dataset(arize_api_key, arize_space_id, selected_dataset)
     return {
         **arize_bundle,
         "dataset_lookup": dataset_lookup,
-        "tasks": build_tasks(client, dataset, prompt_v1, prompt_v2, prompt_v3),
-        "evaluators": build_evaluators(client, dataset_lookup),
+        "selected_dataset": selected_dataset,
+        "tasks": build_tasks(client, selected_dataset, prompt_v1, prompt_v2, prompt_v3),
+        "build_evaluators": lambda variant_name: build_evaluators(
+            client,
+            dataset_lookup,
+            variant_name=variant_name,
+            variant_behavior=VARIANT_BEHAVIORS[variant_name],
+        ),
         "tool_count": len(TOOLS),
+        "limit_n": limit_n,
     }

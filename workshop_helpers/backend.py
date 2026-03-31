@@ -50,6 +50,19 @@ PRODUCT_DB = {
     }
 }
 
+ACTION_RESULTS = {
+    "issue_refund": {"status": "refund_initiated", "eta_days": "3-5 business days"},
+    "send_return_label": {"status": "label_sent", "eta_minutes": 5},
+    "send_replacement": {"status": "replacement_dispatched", "eta_days": "1-2 business days"},
+    "escalate": {"status": "escalated", "ticket_id": "ESC_00291", "eta": "supervisor review within 2 business hours"},
+    "send_unlock_email": {"status": "unlock_email_sent", "eta_minutes": 1},
+    "resend_reset_email": {"status": "reset_email_resent", "eta_minutes": 1},
+    "cancel_subscription": {"status": "subscription_cancelled", "effective": "end of current period"},
+    "apply_subscription_credit": {"status": "credit_applied", "eta_days": "3-5 business days"},
+}
+
+ACTION_TOOL_NAMES = list(ACTION_RESULTS.keys())
+
 
 def snapshot_backend() -> dict:
     return {
@@ -124,26 +137,76 @@ def get_product_info(product_name: str) -> dict:
     return info
 
 
-@function_tool
-def take_action(customer_id: str, action: str, details: str) -> dict:
-    """Perform a customer support action on behalf of the customer."""
-    action_results = {
-        "issue_refund": {"status": "refund_initiated", "eta_days": "3-5 business days"},
-        "send_return_label": {"status": "label_sent", "eta_minutes": 5},
-        "send_replacement": {"status": "replacement_dispatched", "eta_days": "1-2 business days"},
-        "escalate": {"status": "escalated", "ticket_id": "ESC_00291", "eta": "supervisor review within 2 business hours"},
-        "send_unlock_email": {"status": "unlock_email_sent", "eta_minutes": 1},
-        "resend_reset_email": {"status": "reset_email_resent", "eta_minutes": 1},
-        "cancel_subscription": {"status": "subscription_cancelled", "effective": "end of current period"},
-        "apply_subscription_credit": {"status": "credit_applied", "eta_days": "3-5 business days"},
-    }
-    result = dict(action_results.get(action, {"status": "unknown_action", "action": action}))
+def _perform_action(customer_id: str, action: str, details: str) -> dict:
+    result = dict(ACTION_RESULTS[action])
+    result["action"] = action
     result["customer_id"] = customer_id
     result["details"] = details
     return result
 
 
-TOOLS = [get_customer_profile, get_order_details, check_return_eligibility, get_product_info, take_action]
+@function_tool
+def issue_refund(customer_id: str, details: str) -> dict:
+    """Issue a refund to the customer's original payment method."""
+    return _perform_action(customer_id, "issue_refund", details)
+
+
+@function_tool
+def send_return_label(customer_id: str, details: str) -> dict:
+    """Email a prepaid return label to the customer."""
+    return _perform_action(customer_id, "send_return_label", details)
+
+
+@function_tool
+def send_replacement(customer_id: str, details: str) -> dict:
+    """Ship the correct replacement item to the customer."""
+    return _perform_action(customer_id, "send_replacement", details)
+
+
+@function_tool
+def escalate(customer_id: str, details: str) -> dict:
+    """Escalate the case to a supervisor for manual review."""
+    return _perform_action(customer_id, "escalate", details)
+
+
+@function_tool
+def send_unlock_email(customer_id: str, details: str) -> dict:
+    """Send an account unlock email to the customer."""
+    return _perform_action(customer_id, "send_unlock_email", details)
+
+
+@function_tool
+def resend_reset_email(customer_id: str, details: str) -> dict:
+    """Resend the password reset email to the customer."""
+    return _perform_action(customer_id, "resend_reset_email", details)
+
+
+@function_tool
+def cancel_subscription(customer_id: str, details: str) -> dict:
+    """Cancel the customer's subscription."""
+    return _perform_action(customer_id, "cancel_subscription", details)
+
+
+@function_tool
+def apply_subscription_credit(customer_id: str, details: str) -> dict:
+    """Apply a billing credit to the customer's subscription account."""
+    return _perform_action(customer_id, "apply_subscription_credit", details)
+
+
+TOOLS = [
+    get_customer_profile,
+    get_order_details,
+    check_return_eligibility,
+    get_product_info,
+    issue_refund,
+    send_return_label,
+    send_replacement,
+    escalate,
+    send_unlock_email,
+    resend_reset_email,
+    cancel_subscription,
+    apply_subscription_credit,
+]
 
 
 def default_support_agent_instructions(authenticated_customer_id: str) -> str:
@@ -154,7 +217,7 @@ def default_support_agent_instructions(authenticated_customer_id: str) -> str:
         "Use get_order_details for shipping, billing, warranty, and fulfillment issues tied to an order. "
         "Use check_return_eligibility before approving or declining any return. "
         "If the tools give you enough information to complete the request, you must take the action before replying. "
-        "Use take_action for any refund, escalation, label, replacement, cancellation, or email. "
+        "Use the explicit action tools when an action is needed: issue_refund, send_return_label, send_replacement, escalate, send_unlock_email, resend_reset_email, cancel_subscription, or apply_subscription_credit. "
         "Do not merely promise an action in prose when a tool can perform it. "
         "Mention the confirmed action result in the response. "
         "Be empathetic and specific. Never invent figures or dates."
@@ -169,7 +232,7 @@ def support_agent_instructions_template() -> str:
         "Use get_order_details for shipping, billing, warranty, and fulfillment issues tied to an order. "
         "Use check_return_eligibility before approving or declining any return. "
         "If the tools give you enough information to complete the request, you must take the action before replying. "
-        "Use take_action for any refund, escalation, label, replacement, cancellation, or email. "
+        "Use the explicit action tools when an action is needed: issue_refund, send_return_label, send_replacement, escalate, send_unlock_email, resend_reset_email, cancel_subscription, or apply_subscription_credit. "
         "Do not merely promise an action in prose when a tool can perform it. "
         "Mention the confirmed action result in the response. "
         "Be empathetic and specific. Never invent figures or dates."
@@ -217,14 +280,24 @@ def run_support_agent(
             instructions=instructions,
         )
     )
+    tool_calls = []
+    action_calls = []
+    for item in result.new_items:
+        raw = getattr(item, "raw_item", None)
+        if not raw or not hasattr(raw, "name"):
+            continue
+        entry = {"name": raw.name}
+        arguments = getattr(raw, "arguments", None)
+        if arguments is not None:
+            entry["arguments"] = arguments
+        tool_calls.append(entry)
+        if raw.name in ACTION_TOOL_NAMES:
+            action_calls.append(entry)
+
     return {
         "output": result.final_output,
-        "tool_calls": [
-            raw.name
-            for item in result.new_items
-            for raw in [getattr(item, "raw_item", None)]
-            if raw and hasattr(raw, "name")
-        ],
+        "tool_calls": tool_calls,
+        "action_calls": action_calls,
     }
 
 
@@ -233,10 +306,10 @@ def run_support_agent_threadsafe(
     authenticated_customer_id: str,
     model: str = "gpt-4o-mini",
     instructions: str | None = None,
-) -> str:
+) -> dict:
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(run_support_agent, customer_message, authenticated_customer_id, model, instructions)
-        return future.result()["output"]
+        return future.result()
 
 
 def hydrate_backend_from_dataset(dataset: list[dict]) -> dict:
