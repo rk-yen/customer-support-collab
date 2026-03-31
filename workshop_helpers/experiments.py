@@ -118,7 +118,6 @@ def build_tasks(client, dataset: list[dict], prompt_v1: str, prompt_v2: str, pro
     def task_v3(row: dict) -> str:
         result = run_support_agent_threadsafe(
             customer_message=row["user_input"],
-            authenticated_customer_id=row.get("customer_id") or "UNKNOWN",
             instructions=prompt_v3.format(
                 authenticated_customer_id=row.get("customer_id") or "UNKNOWN"
             ),

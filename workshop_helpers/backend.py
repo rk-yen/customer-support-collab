@@ -208,45 +208,13 @@ TOOLS = [
     apply_subscription_credit,
 ]
 
-
-def default_support_agent_instructions(authenticated_customer_id: str) -> str:
-    return (
-        "You are a customer support agent for an online retail store. "
-        f"The authenticated customer ID for this session is: {authenticated_customer_id}. "
-        "Always call get_customer_profile first to understand the customer before responding. "
-        "Use get_order_details for shipping, billing, warranty, and fulfillment issues tied to an order. "
-        "Use check_return_eligibility before approving or declining any return. "
-        "If the tools give you enough information to complete the request, you must take the action before replying. "
-        "Use the explicit action tools when an action is needed: issue_refund, send_return_label, send_replacement, escalate, send_unlock_email, resend_reset_email, cancel_subscription, or apply_subscription_credit. "
-        "Do not merely promise an action in prose when a tool can perform it. "
-        "Mention the confirmed action result in the response. "
-        "Be empathetic and specific. Never invent figures or dates."
-    )
-
-
-def support_agent_instructions_template() -> str:
-    return (
-        "You are a customer support agent for an online retail store. "
-        "The authenticated customer ID for this session is: {authenticated_customer_id}. "
-        "Always call get_customer_profile first to understand the customer before responding. "
-        "Use get_order_details for shipping, billing, warranty, and fulfillment issues tied to an order. "
-        "Use check_return_eligibility before approving or declining any return. "
-        "If the tools give you enough information to complete the request, you must take the action before replying. "
-        "Use the explicit action tools when an action is needed: issue_refund, send_return_label, send_replacement, escalate, send_unlock_email, resend_reset_email, cancel_subscription, or apply_subscription_credit. "
-        "Do not merely promise an action in prose when a tool can perform it. "
-        "Mention the confirmed action result in the response. "
-        "Be empathetic and specific. Never invent figures or dates."
-    )
-
-
 def build_support_agent(
-    authenticated_customer_id: str,
     model: str = "gpt-4o-mini",
     instructions: str | None = None,
 ) -> Agent:
     return Agent(
         name="Customer Support Agent",
-        instructions=instructions or default_support_agent_instructions(authenticated_customer_id),
+        instructions=instructions,
         tools=TOOLS,
         model=model,
     )
@@ -254,12 +222,10 @@ def build_support_agent(
 
 async def run_support_agent_async(
     customer_message: str,
-    authenticated_customer_id: str,
     model: str = "gpt-4o-mini",
     instructions: str | None = None,
 ):
     agent = build_support_agent(
-        authenticated_customer_id=authenticated_customer_id,
         model=model,
         instructions=instructions,
     )
@@ -268,14 +234,12 @@ async def run_support_agent_async(
 
 def run_support_agent(
     customer_message: str,
-    authenticated_customer_id: str,
     model: str = "gpt-4o-mini",
     instructions: str | None = None,
 ) -> dict:
     result = asyncio.run(
         run_support_agent_async(
             customer_message=customer_message,
-            authenticated_customer_id=authenticated_customer_id,
             model=model,
             instructions=instructions,
         )
@@ -303,12 +267,11 @@ def run_support_agent(
 
 def run_support_agent_threadsafe(
     customer_message: str,
-    authenticated_customer_id: str,
     model: str = "gpt-4o-mini",
     instructions: str | None = None,
 ) -> dict:
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(run_support_agent, customer_message, authenticated_customer_id, model, instructions)
+        future = pool.submit(run_support_agent, customer_message, model, instructions)
         return future.result()
 
 
