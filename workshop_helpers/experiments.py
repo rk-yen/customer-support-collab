@@ -193,6 +193,7 @@ def prepare_experiment_bundle(
     prompt_v1: str,
     prompt_v2: str,
     prompt_v3: str,
+    judge_prompts: dict,
     limit_n: int | None = None,
 ) -> dict:
     selected_dataset = select_cases(dataset, limit_n=limit_n)
@@ -209,6 +210,7 @@ def prepare_experiment_bundle(
             dataset_lookup,
             variant_name=variant_name,
             variant_behavior=VARIANT_BEHAVIORS[variant_name],
+            judge_prompts=judge_prompts,
         ),
         "tool_count": len(TOOLS),
         "limit_n": limit_n,

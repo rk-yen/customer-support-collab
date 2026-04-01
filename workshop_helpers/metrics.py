@@ -6,48 +6,6 @@ from arize.experiments.evaluators.base import EvaluationResult, Evaluator
 LABEL_SCORE = {"Good": 1.0, "Acceptable": 0.5, "Poor": 0.0}
 VARIANT_DISPLAY = {"router": "router", "v1": "v1", "v2": "v2", "v3": "v3"}
 
-TONE_JUDGE = (
-    "You evaluate customer support responses for tone.\n\n"
-    "Return exactly two lines in this format:\n"
-    "LABEL: <Good|Acceptable|Poor>\n"
-    "REASONING: <one sentence>\n\n"
-    "GOOD: Warm, empathetic, and professional.\n"
-    "ACCEPTABLE: Polite but generic or slightly flat.\n"
-    "POOR: Cold, robotic, dismissive, or argumentative."
-)
-
-OUTCOME_JUDGE = (
-    "Evaluate whether the response reaches the right substantive outcome for the case.\n\n"
-    "Customer message:\n{user_input}\n\n"
-    "Expected output:\n{ideal}\n\n"
-    "Actual response:\n{actual}\n\n"
-    "Return exactly two lines in this format:\n"
-    "LABEL: <Good|Acceptable|Poor>\n"
-    "REASONING: <one sentence>\n\n"
-    "GOOD: Reaches the same core outcome as the expected output.\n"
-    "ACCEPTABLE: Mostly correct but missing important specifics or completeness.\n"
-    "POOR: Wrong outcome, misses the main point, or fails to address the user need."
-)
-
-WORKFLOW_JUDGE = (
-    "Evaluate whether the response matches the expected workflow behavior for this system variant.\n\n"
-    "System variant: {variant_name}\n"
-    "Expected variant behavior: {variant_behavior}\n"
-    "Variant-specific expectation for this case: {variant_expectation}\n"
-    "Case workflow expectation: {workflow_expectation}\n"
-    "Missing info required: {missing_info_required}\n"
-    "Action expected: {action_expected}\n"
-    "Action type: {action_type}\n\n"
-    "Customer message:\n{user_input}\n\n"
-    "Actual response:\n{actual}\n\n"
-    "Return exactly two lines in this format:\n"
-    "LABEL: <Good|Acceptable|Poor>\n"
-    "REASONING: <one sentence>\n\n"
-    "GOOD: Clearly matches the expected workflow behavior for this variant.\n"
-    "ACCEPTABLE: Partially matches but is missing specificity or discipline.\n"
-    "POOR: Does not match the expected workflow behavior for this variant."
-)
-
 
 def _parse_judge_response(text: str) -> tuple[str, str]:
     label_match = re.search(r"LABEL:\s*(Good|Acceptable|Poor)", text, re.IGNORECASE)
@@ -144,17 +102,17 @@ def _judge_with_reasoning(client, system_prompt: str, user_prompt: str) -> tuple
     return _parse_judge_response(content)
 
 
-def judge_tone(client, output: str) -> tuple[str, str]:
+def judge_tone(client, output: str, judge_prompts: dict) -> tuple[str, str]:
     payload = _parse_task_output(output)
-    return _judge_with_reasoning(client, TONE_JUDGE, f"Response:\n{payload['response_text']}")
+    return _judge_with_reasoning(client, judge_prompts["tone"], f"Response:\n{payload['response_text']}")
 
 
-def judge_outcome(client, output: str, case: dict) -> tuple[str, str]:
+def judge_outcome(client, output: str, case: dict, judge_prompts: dict) -> tuple[str, str]:
     payload = _parse_task_output(output)
     return _judge_with_reasoning(
         client,
-        "You are a strict evaluator of support response correctness.",
-        OUTCOME_JUDGE.format(
+        judge_prompts["outcome_system"],
+        judge_prompts["outcome"].format(
             user_input=case.get("user_input", ""),
             ideal=case.get("expected_output", ""),
             actual=payload["response_text"],
@@ -162,7 +120,14 @@ def judge_outcome(client, output: str, case: dict) -> tuple[str, str]:
     )
 
 
-def judge_workflow_fit(client, output: str, case: dict, variant_name: str, variant_behavior: str) -> tuple[str, str]:
+def judge_workflow_fit(
+    client,
+    output: str,
+    case: dict,
+    variant_name: str,
+    variant_behavior: str,
+    judge_prompts: dict,
+) -> tuple[str, str]:
     payload = _parse_task_output(output)
     tool_calls = payload["tool_calls"]
     action_calls = payload["action_calls"]
@@ -184,8 +149,8 @@ def judge_workflow_fit(client, output: str, case: dict, variant_name: str, varia
     ) or "none"
     return _judge_with_reasoning(
         client,
-        "You are a strict evaluator of support workflow behavior.",
-        WORKFLOW_JUDGE.format(
+        judge_prompts["workflow_system"],
+        judge_prompts["workflow"].format(
             variant_name=variant_name,
             variant_behavior=variant_behavior,
             variant_expectation=_variant_expectation(case, variant_name),
@@ -239,14 +204,22 @@ def score_routing_response(output: str, expected_category: str) -> dict:
     }
 
 
-def score_single_response(client, output: str, case: dict, variant_name: str, variant_behavior: str) -> dict:
-    tone_label, tone_reasoning = judge_tone(client, output)
+def score_single_response(
+    client,
+    output: str,
+    case: dict,
+    variant_name: str,
+    variant_behavior: str,
+    judge_prompts: dict,
+) -> dict:
+    tone_label, tone_reasoning = judge_tone(client, output, judge_prompts=judge_prompts)
     workflow_label, workflow_reasoning = judge_workflow_fit(
         client,
         output,
         case,
         variant_name=variant_name,
         variant_behavior=variant_behavior,
+        judge_prompts=judge_prompts,
     )
 
     row = {
@@ -261,7 +234,7 @@ def score_single_response(client, output: str, case: dict, variant_name: str, va
     scores = [LABEL_SCORE.get(tone_label, 0.0), LABEL_SCORE.get(workflow_label, 0.0)]
 
     if variant_name != "v1":
-        outcome_label, outcome_reasoning = judge_outcome(client, output, case)
+        outcome_label, outcome_reasoning = judge_outcome(client, output, case, judge_prompts=judge_prompts)
         row["correct_outcome"] = outcome_label
         row["outcome_reasoning"] = outcome_reasoning
         scores.append(LABEL_SCORE.get(outcome_label, 0.0))
@@ -277,7 +250,13 @@ def score_single_response(client, output: str, case: dict, variant_name: str, va
     return row
 
 
-def compare_scores(client, outputs: dict, case: dict, variant_behaviors: dict | None = None) -> list[dict]:
+def compare_scores(
+    client,
+    outputs: dict,
+    case: dict,
+    judge_prompts: dict,
+    variant_behaviors: dict | None = None,
+) -> list[dict]:
     variant_behaviors = variant_behaviors or {}
     rows = []
     for label, output in outputs.items():
@@ -290,6 +269,7 @@ def compare_scores(client, outputs: dict, case: dict, variant_behaviors: dict | 
                     case,
                     variant_name=label,
                     variant_behavior=variant_behaviors.get(label, label),
+                    judge_prompts=judge_prompts,
                 ),
             }
         )
@@ -310,31 +290,41 @@ class ExactMatchEvaluator(Evaluator):
 
 
 class ToneQualityEvaluator(Evaluator):
-    def __init__(self, client):
+    def __init__(self, client, judge_prompts: dict):
         self.client = client
+        self.judge_prompts = judge_prompts
 
     def evaluate(self, dataset_row, input, output, **kwargs) -> EvaluationResult:
-        label, reasoning = judge_tone(self.client, output or "")
+        label, reasoning = judge_tone(self.client, output or "", judge_prompts=self.judge_prompts)
         return EvaluationResult(score=LABEL_SCORE.get(label, 0.0), label=label, explanation=reasoning)
 
 
 class CorrectOutcomeEvaluator(Evaluator):
-    def __init__(self, client, dataset_by_id: dict):
+    def __init__(self, client, dataset_by_id: dict, judge_prompts: dict):
         self.client = client
         self.dataset_by_id = dataset_by_id
+        self.judge_prompts = judge_prompts
 
     def evaluate(self, dataset_row, input, output, **kwargs) -> EvaluationResult:
         case = self.dataset_by_id.get(dataset_row.get("scenario_id"), {})
-        label, reasoning = judge_outcome(self.client, output or "", case)
+        label, reasoning = judge_outcome(self.client, output or "", case, judge_prompts=self.judge_prompts)
         return EvaluationResult(score=LABEL_SCORE.get(label, 0.0), label=label, explanation=reasoning)
 
 
 class WorkflowFitEvaluator(Evaluator):
-    def __init__(self, client, dataset_by_id: dict, variant_name: str, variant_behavior: str):
+    def __init__(
+        self,
+        client,
+        dataset_by_id: dict,
+        variant_name: str,
+        variant_behavior: str,
+        judge_prompts: dict,
+    ):
         self.client = client
         self.dataset_by_id = dataset_by_id
         self.variant_name = variant_name
         self.variant_behavior = variant_behavior
+        self.judge_prompts = judge_prompts
 
     def evaluate(self, dataset_row, input, output, **kwargs) -> EvaluationResult:
         case = self.dataset_by_id.get(dataset_row.get("scenario_id"), {})
@@ -344,6 +334,7 @@ class WorkflowFitEvaluator(Evaluator):
             case,
             variant_name=self.variant_name,
             variant_behavior=self.variant_behavior,
+            judge_prompts=self.judge_prompts,
         )
         return EvaluationResult(score=LABEL_SCORE.get(label, 0.0), label=label, explanation=reasoning)
 
@@ -361,16 +352,28 @@ class ActionExecutionEvaluator(Evaluator):
         return EvaluationResult(score=LABEL_SCORE.get(label, 0.0), label=label, explanation=reasoning)
 
 
-def build_evaluators(client, dataset_by_id: dict, variant_name: str, variant_behavior: str) -> list[Evaluator]:
+def build_evaluators(
+    client,
+    dataset_by_id: dict,
+    variant_name: str,
+    variant_behavior: str,
+    judge_prompts: dict,
+) -> list[Evaluator]:
     if variant_name == "router":
         return [ExactMatchEvaluator(expected_field="category")]
 
     evaluators: list[Evaluator] = [
-        ToneQualityEvaluator(client),
-        WorkflowFitEvaluator(client, dataset_by_id, variant_name=variant_name, variant_behavior=variant_behavior),
+        ToneQualityEvaluator(client, judge_prompts=judge_prompts),
+        WorkflowFitEvaluator(
+            client,
+            dataset_by_id,
+            variant_name=variant_name,
+            variant_behavior=variant_behavior,
+            judge_prompts=judge_prompts,
+        ),
     ]
     if variant_name != "v1":
-        evaluators.insert(1, CorrectOutcomeEvaluator(client, dataset_by_id))
+        evaluators.insert(1, CorrectOutcomeEvaluator(client, dataset_by_id, judge_prompts=judge_prompts))
     if variant_name == "v3":
         evaluators.append(ActionExecutionEvaluator(dataset_by_id))
     return evaluators
