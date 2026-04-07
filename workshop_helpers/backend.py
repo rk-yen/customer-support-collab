@@ -1,64 +1,28 @@
 import asyncio
 import concurrent.futures
+import json
+from pathlib import Path
 
 from agents import Agent, Runner, function_tool
 
-RETURN_POLICY_DAYS = 30
+_BILLING_REFERENCE_PATH = Path(__file__).with_name("billing_reference.json")
 
-ORDER_DB = {
-    "ORD_9901": {"customer_id": "CUST_4821", "product": "SoundWave Pro Bluetooth Speaker", "date": "2024-03-08", "total": 79.99, "status": "delivered", "days_ago": 14},
-    "ORD_8842": {"customer_id": "CUST_3307", "product": "ErgoRise Adjustable Laptop Stand", "date": "2024-03-18", "total": 54.99, "status": "delivered", "days_ago": 4},
-    "ORD_7753": {"customer_id": "CUST_6614", "product": "Ceramic Pour-Over Coffee Set", "date": "2024-03-20", "total": 44.99, "status": "processing", "days_ago": 2, "flags": ["duplicate_charge"]},
-    "ORD_6630": {"customer_id": "CUST_1145", "product": "Yoga Mat Bundle", "date": "2024-03-14", "total": 89.00, "status": "in_transit", "days_ago": 8, "tracking": "TRK_882991", "estimated_delivery": "2024-03-24", "delay_reason": "weather hold at regional hub"},
-    "ORD_5517": {"customer_id": "CUST_9920", "product": "Stainless Steel Water Bottle 3-Pack", "date": "2024-03-22", "total": 38.50, "status": "processing", "days_ago": 0, "dispatch_window_minutes": 90},
-    "ORD_4410": {"customer_id": "CUST_6623", "product": "Urban Commuter Backpack", "date": "2024-03-01", "total": 94.99, "status": "delivered", "days_ago": 21, "warranty_days": 90, "defect_confirmed": True},
-    "ORD_3318": {"customer_id": "CUST_5540", "product": "Classic Canvas Tote - Navy Blue", "date": "2024-03-17", "total": 32.00, "status": "delivered", "days_ago": 5, "fulfillment_error": "wrong_colour_shipped", "correct_variant_in_stock": True},
-    "ORD_2209": {"customer_id": "CUST_7765", "product": "SoundPro 400 Over-Ear Headphones", "date": "2024-03-08", "total": 119.99, "status": "delivered", "days_ago": 14},
-    "ORD_8814": {"customer_id": "CUST_6601", "product": "ErgoRise Pro Laptop Stand", "date": "2024-02-16", "total": 69.99, "status": "delivered", "days_ago": 35},
-    "ORD_7701": {"customer_id": "CUST_9934", "product": "Smart Home Starter Kit", "date": "2024-03-05", "total": 149.99, "status": "lost_in_transit", "days_ago": 17, "carrier_verdict": "confirmed_lost", "refund_due": True},
-}
-
-CUSTOMER_DB = {
-    "CUST_4821": {"name": "Maya Patel", "status": "active", "orders": ["ORD_9901"]},
-    "CUST_3307": {"name": "David Chen", "status": "active", "orders": ["ORD_8842"]},
-    "CUST_6614": {"name": "Sophie Williams", "status": "active", "orders": ["ORD_7753"]},
-    "CUST_2290": {"name": "James Okafor", "status": "active", "orders": [], "subscription": {"plan": "Premium Monthly", "price": 12.99, "enrolled": "2024-02-01", "last_billed": "2024-03-01", "auto_converted_from_trial": True}},
-    "CUST_5503": {"name": "Priya Sharma", "status": "locked", "lock_reason": "5 failed login attempts at 09:14", "orders": []},
-    "CUST_8871": {"name": "Tom Reeves", "status": "active", "orders": [], "email": "t.reeves_home@email.com", "last_reset_sent": "2024-03-22T10:42:00"},
-    "CUST_1145": {"name": "Aisha Nguyen", "status": "active", "orders": ["ORD_6630"]},
-    "CUST_9920": {"name": "Ben Hartley", "status": "active", "orders": ["ORD_5517"]},
-    "CUST_3388": {"name": "Clara Johansson", "status": "active", "orders": [], "app_version": "4.1.0", "device": "Android 13", "latest_app_version": "4.2.1", "release_notes": "4.2.1 (2024-03-15): fixes order history crash on Android 13"},
-    "CUST_7712": {"name": "Ryan Foster", "status": "active", "orders": [], "first_purchase_date": "2023-11-10", "promo_notes": "WELCOME15 is new-customer only - not eligible"},
-    "CUST_4409": {"name": "Nina Kowalski", "status": "active", "orders": []},
-    "CUST_6623": {"name": "Lena Fischer", "status": "active", "orders": ["ORD_4410"]},
-    "CUST_8830": {"name": "Omar Hassan", "status": "active", "orders": [], "subscription": {"plan": "Premium Monthly", "price": 14.99, "next_billing": "2024-04-01", "cancellation_fee": 0}},
-    "CUST_2271": {"name": "Fatima Al-Rashid", "status": "active", "orders": [], "subscription": {"plan": "Basic", "price": 9.00, "billing_day": 10, "upgrade_target": "Premium", "upgrade_price": 24.00, "prorate_today": 15.00}},
-    "CUST_5540": {"name": "Jack Morrison", "status": "active", "orders": ["ORD_3318"]},
-    "CUST_7765": {"name": "Sara Kim", "status": "active", "orders": ["ORD_2209"]},
-    "CUST_3392": {"name": "Mark Davies", "status": "active", "orders": ["ORD_1101", "ORD_0982"], "expired_orders": ["ORD_0874"]},
-    "CUST_6601": {"name": "Elena Vasquez", "status": "active", "orders": ["ORD_8814"]},
-    "CUST_9934": {"name": "Carlos Mendez", "status": "active", "orders": ["ORD_7701"], "contact_history": [{"date": "2024-03-12", "note": "Advised to wait for delivery"}, {"date": "2024-03-16", "note": "Carrier investigation opened"}, {"date": "2024-03-19", "note": "Asked for update, no resolution"}]},
-    "CUST_1187": {"name": "Aiko Tanaka", "status": "active", "orders": [], "subscription": {"plan": "Basic", "price": 9.00, "last_charge": 24.00, "overcharge_amount": 15.00, "billing_error": True}, "app_version": "4.0.9", "device": "Android", "latest_app_version": "4.2.1", "release_notes": "4.2.1 (2024-03-15): fixes random logout bug"},
-}
-
-PRODUCT_DB = {
-    "QuickCharge 15W Wireless Pad": {
-        "compatible_with": ["iPhone 8 and later", "all Android Qi devices"],
-        "magsafe_compatible": True,
-        "max_wattage_magsafe": 15,
-        "max_wattage_qi": 7.5,
-    }
-}
+BILLING_ACCOUNT_DB: dict[str, dict] = {}
+INVOICE_DB: dict[str, dict] = {}
+BILLING_REFERENCE_DB: dict[str, dict] = (
+    json.loads(_BILLING_REFERENCE_PATH.read_text()) if _BILLING_REFERENCE_PATH.exists() else {}
+)
 
 ACTION_RESULTS = {
-    "issue_refund": {"status": "refund_initiated", "eta_days": "3-5 business days"},
-    "send_return_label": {"status": "label_sent", "eta_minutes": 5},
-    "send_replacement": {"status": "replacement_dispatched", "eta_days": "1-2 business days"},
-    "escalate": {"status": "escalated", "ticket_id": "ESC_00291", "eta": "supervisor review within 2 business hours"},
-    "send_unlock_email": {"status": "unlock_email_sent", "eta_minutes": 1},
-    "resend_reset_email": {"status": "reset_email_resent", "eta_minutes": 1},
-    "cancel_subscription": {"status": "subscription_cancelled", "effective": "end of current period"},
-    "apply_subscription_credit": {"status": "credit_applied", "eta_days": "3-5 business days"},
+    "apply_billing_credit": {
+        "status": "credit_applied",
+        "eta": "visible on the account within 1 business day",
+    },
+    "escalate_to_human": {
+        "status": "escalated",
+        "queue": "human_billing_specialist",
+        "eta": "follow-up within 2 business hours",
+    },
 }
 
 ACTION_TOOL_NAMES = list(ACTION_RESULTS.keys())
@@ -66,179 +30,96 @@ ACTION_TOOL_NAMES = list(ACTION_RESULTS.keys())
 
 def snapshot_backend() -> dict:
     return {
-        "order_count": len(ORDER_DB),
-        "customer_count": len(CUSTOMER_DB),
-        "product_count": len(PRODUCT_DB),
+        "billing_account_count": len(BILLING_ACCOUNT_DB),
+        "invoice_count": len(INVOICE_DB),
+        "billing_reference_topics": len(BILLING_REFERENCE_DB),
     }
 
 
 @function_tool
-def get_customer_profile(customer_id: str) -> dict:
-    """Get the full customer profile for the authenticated customer."""
-    profile = CUSTOMER_DB.get(customer_id)
-    if not profile:
-        return {"error": f"No customer found: {customer_id}"}
-
-    result = dict(profile)
-    result["order_summaries"] = [
-        {
-            "order_id": order_id,
-            "product": ORDER_DB.get(order_id, {}).get("product"),
-            "date": ORDER_DB.get(order_id, {}).get("date"),
-            "total": ORDER_DB.get(order_id, {}).get("order_total", ORDER_DB.get(order_id, {}).get("total")),
-            "status": ORDER_DB.get(order_id, {}).get("status"),
-            "days_ago": ORDER_DB.get(order_id, {}).get("days_ago"),
-        }
-        for order_id in profile.get("orders", [])
-    ]
-    return result
+def get_billing_account(account_id: str) -> dict:
+    """Look up the billing account record for a customer or workspace."""
+    account = BILLING_ACCOUNT_DB.get(account_id)
+    if not account:
+        return {"error": f"Billing account not found: {account_id}"}
+    return {"account_id": account_id, **account}
 
 
 @function_tool
-def get_order_details(order_id: str) -> dict:
-    """Get the full order record for refunds, shipping issues, warranties, and fulfillment problems."""
-    order = ORDER_DB.get(order_id)
-    if not order:
-        return {"error": f"Order not found: {order_id}"}
-    return {"order_id": order_id, **order}
+def get_invoice_details(invoice_id: str) -> dict:
+    """Fetch the invoice metadata and issue flags for a billing case."""
+    invoice = INVOICE_DB.get(invoice_id)
+    if not invoice:
+        return {"error": f"Invoice not found: {invoice_id}"}
+    return {"invoice_id": invoice_id, **invoice}
 
 
 @function_tool
-def check_return_eligibility(order_id: str) -> dict:
-    """Check whether an order is within the 30-day return window."""
-    order = ORDER_DB.get(order_id)
-    if not order:
-        return {"error": f"Order not found: {order_id}"}
-
-    days_since_order = order.get("days_ago", 0)
-    eligible = days_since_order <= RETURN_POLICY_DAYS
-    return {
-        "order_id": order_id,
-        "product": order.get("product"),
-        "order_total": order.get("total"),
-        "days_since_order": days_since_order,
-        "return_window": RETURN_POLICY_DAYS,
-        "eligible": eligible,
-        "days_over_window": max(0, days_since_order - RETURN_POLICY_DAYS),
-        "recommendation": (
-            "Approve return."
-            if eligible
-            else f"Decline - {days_since_order - RETURN_POLICY_DAYS} day(s) outside window. Offer supervisor escalation."
-        ),
-    }
+def read_billing_reference(topic: str) -> dict:
+    """Read billing guidance from the local JSON reference file."""
+    article = BILLING_REFERENCE_DB.get(topic)
+    if not article:
+        return {"error": f"No billing guidance found for topic: {topic}"}
+    return {"topic": topic, **article}
 
 
-@function_tool
-def get_product_info(product_name: str) -> dict:
-    """Look up product specifications and compatibility information."""
-    info = PRODUCT_DB.get(product_name)
-    if not info:
-        return {"note": f"No detailed specs on file for: {product_name}. Use general knowledge."}
-    return info
-
-
-def _perform_action(customer_id: str, action: str, details: str) -> dict:
+def _perform_action(account_id: str, action: str, details: str) -> dict:
     result = dict(ACTION_RESULTS[action])
     result["action"] = action
-    result["customer_id"] = customer_id
+    result["account_id"] = account_id
     result["details"] = details
     return result
 
 
 @function_tool
-def issue_refund(customer_id: str, details: str) -> dict:
-    """Issue a refund to the customer's original payment method."""
-    return _perform_action(customer_id, "issue_refund", details)
+def apply_billing_credit(account_id: str, details: str) -> dict:
+    """Apply a billing credit or courtesy adjustment to the account."""
+    return _perform_action(account_id, "apply_billing_credit", details)
 
 
 @function_tool
-def send_return_label(customer_id: str, details: str) -> dict:
-    """Email a prepaid return label to the customer."""
-    return _perform_action(customer_id, "send_return_label", details)
-
-
-@function_tool
-def send_replacement(customer_id: str, details: str) -> dict:
-    """Ship the correct replacement item to the customer."""
-    return _perform_action(customer_id, "send_replacement", details)
-
-
-@function_tool
-def escalate(customer_id: str, details: str) -> dict:
-    """Escalate the case to a supervisor for manual review."""
-    return _perform_action(customer_id, "escalate", details)
-
-
-@function_tool
-def send_unlock_email(customer_id: str, details: str) -> dict:
-    """Send an account unlock email to the customer."""
-    return _perform_action(customer_id, "send_unlock_email", details)
-
-
-@function_tool
-def resend_reset_email(customer_id: str, details: str) -> dict:
-    """Resend the password reset email to the customer."""
-    return _perform_action(customer_id, "resend_reset_email", details)
-
-
-@function_tool
-def cancel_subscription(customer_id: str, details: str) -> dict:
-    """Cancel the customer's subscription."""
-    return _perform_action(customer_id, "cancel_subscription", details)
-
-
-@function_tool
-def apply_subscription_credit(customer_id: str, details: str) -> dict:
-    """Apply a billing credit to the customer's subscription account."""
-    return _perform_action(customer_id, "apply_subscription_credit", details)
+def escalate_to_human(account_id: str, details: str) -> dict:
+    """Escalate a case to a human billing specialist."""
+    return _perform_action(account_id, "escalate_to_human", details)
 
 
 TOOLS = [
-    get_customer_profile,
-    get_order_details,
-    check_return_eligibility,
-    get_product_info,
-    issue_refund,
-    send_return_label,
-    send_replacement,
-    escalate,
-    send_unlock_email,
-    resend_reset_email,
-    cancel_subscription,
-    apply_subscription_credit,
+    get_billing_account,
+    get_invoice_details,
+    read_billing_reference,
+    apply_billing_credit,
+    escalate_to_human,
 ]
 
-def build_support_agent(
+
+def build_billing_agent(
     model: str = "gpt-4o-mini",
     instructions: str | None = None,
 ) -> Agent:
     return Agent(
-        name="Customer Support Agent",
+        name="Billing Support Agent",
         instructions=instructions,
         tools=TOOLS,
         model=model,
     )
 
 
-async def run_support_agent_async(
+async def run_billing_agent_async(
     customer_message: str,
     model: str = "gpt-4o-mini",
     instructions: str | None = None,
 ):
-    agent = build_support_agent(
-        model=model,
-        instructions=instructions,
-    )
+    agent = build_billing_agent(model=model, instructions=instructions)
     return await Runner.run(agent, customer_message)
 
 
-def run_support_agent(
+def run_billing_agent(
     customer_message: str,
     model: str = "gpt-4o-mini",
     instructions: str | None = None,
 ) -> dict:
     result = asyncio.run(
-        run_support_agent_async(
+        run_billing_agent_async(
             customer_message=customer_message,
             model=model,
             instructions=instructions,
@@ -265,52 +146,52 @@ def run_support_agent(
     }
 
 
-def run_support_agent_threadsafe(
+def run_billing_agent_threadsafe(
     customer_message: str,
     model: str = "gpt-4o-mini",
     instructions: str | None = None,
 ) -> dict:
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(run_support_agent, customer_message, model, instructions)
+        future = pool.submit(run_billing_agent, customer_message, model, instructions)
         return future.result()
 
 
 def hydrate_backend_from_dataset(dataset: list[dict]) -> dict:
+    BILLING_ACCOUNT_DB.clear()
+    INVOICE_DB.clear()
+
     for case in dataset:
+        if case["category"] not in {"billing", "escalation"}:
+            continue
+
         source_data = case["source_data"]
-        customer_id = source_data.get("customer_id")
-        order_id = source_data.get("order_id")
+        account_id = source_data.get("customer_id")
+        invoice_id = source_data.get("invoice_id")
 
-        if customer_id and customer_id not in CUSTOMER_DB:
-            CUSTOMER_DB[customer_id] = {
-                "name": source_data.get("customer_name", "Unknown"),
-                "status": source_data.get("account_status", "active"),
-                "orders": [order_id] if order_id else [],
-            }
-            for extra_field in [
-                "subscription",
-                "app_version",
-                "device",
-                "latest_app_version",
-                "release_notes",
-                "email",
-                "last_reset_sent",
-                "lock_reason",
-                "first_purchase_date",
-                "promo_notes",
-                "contact_history",
-            ]:
-                if extra_field in source_data:
-                    CUSTOMER_DB[customer_id][extra_field] = source_data[extra_field]
+        if account_id:
+            BILLING_ACCOUNT_DB.setdefault(
+                account_id,
+                {
+                    "account_name": source_data.get("account_name", account_id),
+                    "plan_name": source_data.get("plan_name", "Unknown"),
+                    "billing_status": source_data.get("billing_status", "active"),
+                    "credit_eligible": source_data.get("credit_eligible", False),
+                    "notes": source_data.get("notes", ""),
+                },
+            )
 
-        if order_id and order_id not in ORDER_DB:
-            ORDER_DB[order_id] = {
-                "customer_id": customer_id,
-                "product": source_data.get("product_name"),
-                "date": source_data.get("order_date"),
-                "total": source_data.get("order_total"),
-                "status": source_data.get("order_status"),
-                "days_ago": source_data.get("days_since_order"),
-            }
+        if invoice_id:
+            INVOICE_DB.setdefault(
+                invoice_id,
+                {
+                    "account_id": account_id,
+                    "plan_name": source_data.get("plan_name", "Unknown"),
+                    "last_charge_amount": source_data.get("last_charge_amount"),
+                    "duplicate_charge": source_data.get("duplicate_charge", False),
+                    "credit_eligible": source_data.get("credit_eligible", False),
+                    "billing_status": source_data.get("billing_status", "active"),
+                    "notes": source_data.get("notes", ""),
+                },
+            )
 
     return snapshot_backend()

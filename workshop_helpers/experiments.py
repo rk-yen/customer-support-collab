@@ -1,19 +1,22 @@
 from datetime import datetime
 import json
+import random
 
 import pandas as pd
 from arize import ArizeClient
 
-from workshop_helpers.backend import TOOLS, hydrate_backend_from_dataset, run_support_agent_threadsafe
-from workshop_helpers.metrics import build_evaluators, pack_response_payload
+from workshop_helpers.backend import TOOLS, hydrate_backend_from_dataset, run_billing_agent_threadsafe
+from workshop_helpers.metrics import pack_response_payload, build_evaluators
+from workshop_helpers.scenarios import run_context_agent, run_raw_llm, run_router_structured
 
-DATASET_NAME = "cs-support-workshop-benchmark"
+DATASET_NAME = "workiva-ai-support-copilot-benchmark"
 
 VARIANT_BEHAVIORS = {
-    "router": "Routing agent. It should read the customer message and return exactly one supported category label.",
-    "v1": "Prompt-only assistant with no backend access. It should avoid bluffing, avoid invented actions, and ask one or more focused follow-ups when information is missing.",
-    "v2": "Static-context assistant. It should use the provided support snapshot specifically, but it must not pretend a backend action already happened.",
-    "v3": "Tool-using agent. When enough information exists, it should verify with tools and complete the backend action before replying.",
+    "router": "Routing classifier. It should map the user question to exactly one supported support category.",
+    "permissions": "Prompt-only permissions specialist. It answers from policy-style guidance without tools or hidden context.",
+    "review_workflow": "Context-aware workflow specialist. It answers using retrieved workflow state and blocker context.",
+    "billing": "Tool-using billing specialist. It uses tools and billing JSON guidance before acting or answering.",
+    "v2_routed": "Two-stage support copilot. It routes first, then dispatches to the specialist matched to the routed category.",
 }
 
 
@@ -21,10 +24,16 @@ def dataset_index(dataset: list[dict]) -> dict:
     return {case["scenario_id"]: case for case in dataset}
 
 
-def select_cases(dataset: list[dict], limit_n: int | None = None) -> list[dict]:
+def select_cases(dataset: list[dict], limit_n: int | None = None, seed: int = 42) -> list[dict]:
     if limit_n is None:
         return list(dataset)
-    return list(dataset[:limit_n])
+    shuffled = list(dataset)
+    random.Random(seed).shuffle(shuffled)
+    return shuffled[:limit_n]
+
+
+def select_cases_by_category(dataset: list[dict], category: str) -> list[dict]:
+    return [case for case in dataset if case["category"] == category]
 
 
 def summarize_dataset(dataset: list[dict]) -> dict:
@@ -82,74 +91,174 @@ def ensure_arize_dataset(arize_api_key: str, arize_space_id: str, dataset: list[
     }
 
 
+def build_review_context_message(customer_message: str, source_data: dict) -> str:
+    context_block = json.dumps(source_data, indent=2)
+    return f"Workflow context:\n{context_block}\n\nUser question:\n{customer_message}"
+
+
+def dispatch_specialist_response(
+    client,
+    route_category: str,
+    case: dict,
+    prompt_permissions: str,
+    prompt_review_workflow: str,
+    prompt_billing: str,
+    escalation_response_template: str,
+) -> dict:
+    user_input = case["user_input"]
+    source_data = case["source_data"]
+    router_record = {"name": "route_to_specialist", "arguments": json.dumps({"category": route_category})}
+
+    if route_category == "permissions":
+        response_text = run_raw_llm(client, user_input, prompt_permissions)
+        return pack_response_payload(
+            response_text,
+            tool_calls=[router_record],
+            metadata={"route_category": route_category},
+        )
+
+    if route_category == "review_workflow":
+        response_text = run_context_agent(
+            client,
+            build_review_context_message(user_input, source_data),
+            prompt_review_workflow,
+        )
+        return pack_response_payload(
+            response_text,
+            tool_calls=[router_record],
+            metadata={"route_category": route_category},
+        )
+
+    if route_category == "billing":
+        account_id = source_data.get("customer_id", "UNKNOWN")
+        result = run_billing_agent_threadsafe(
+            customer_message=user_input,
+            instructions=prompt_billing.format(authenticated_account_id=account_id),
+        )
+        return pack_response_payload(
+            result["output"],
+            tool_calls=[router_record, *result.get("tool_calls", [])],
+            action_calls=result.get("action_calls", []),
+            metadata={"route_category": route_category},
+        )
+
+    response_text = escalation_response_template.format(
+        account_name=source_data.get("account_name", "your team")
+    )
+    action_call = {
+        "name": "escalate_to_human",
+        "arguments": json.dumps({"customer_id": source_data.get("customer_id", "UNKNOWN"), "reason": case["user_input"]}),
+    }
+    return pack_response_payload(
+        response_text,
+        tool_calls=[router_record],
+        action_calls=[action_call],
+        metadata={"route_category": "escalation"},
+    )
+
+
 def build_tasks(
     client,
     dataset: list[dict],
     prompt_router: str,
-    prompt_v1: str,
-    prompt_v2: str,
-    prompt_v3: str,
+    prompt_permissions: str,
+    prompt_review_workflow: str,
+    prompt_billing: str,
+    escalation_response_template: str,
 ) -> dict:
     cases_by_id = dataset_index(dataset)
     categories = sorted({case["category"] for case in dataset})
 
     def task_router(row: dict) -> str:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": prompt_router.format(categories=", ".join(categories))},
-                {"role": "user", "content": row["user_input"]},
-            ],
-            temperature=0,
-            max_tokens=20,
-        )
-        return pack_response_payload(response.choices[0].message.content.strip())
+        route = run_router_structured(client, row["user_input"], prompt_router, categories)
+        return pack_response_payload(route["category"], metadata=route)
 
-    def task_v1(row: dict) -> str:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": prompt_v1},
-                {"role": "user", "content": row["user_input"]},
-            ],
-            temperature=0.3,
-            max_tokens=220,
-        )
-        return pack_response_payload(response.choices[0].message.content.strip())
-
-    def task_v2(row: dict) -> str:
+    def task_v2_routed(row: dict) -> str:
         case = cases_by_id.get(row["scenario_id"])
         if not case:
-            return "Error: case not found"
-        message = (
-            f"Customer context (internal support snapshot):\n{json.dumps(case['source_data'], indent=2)}"
-            f"\n\nCustomer message:\n{row['user_input']}"
-        )
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": prompt_v2},
-                {"role": "user", "content": message},
-            ],
-            temperature=0.3,
-            max_tokens=220,
-        )
-        return pack_response_payload(response.choices[0].message.content.strip())
-
-    def task_v3(row: dict) -> str:
-        result = run_support_agent_threadsafe(
-            customer_message=row["user_input"],
-            instructions=prompt_v3.format(
-                authenticated_customer_id=row.get("customer_id") or "UNKNOWN"
-            ),
-        )
-        return pack_response_payload(
-            result["output"],
-            tool_calls=result.get("tool_calls", []),
-            action_calls=result.get("action_calls", []),
+            return pack_response_payload("Error: case not found")
+        route = run_router_structured(client, row["user_input"], prompt_router, categories)
+        return dispatch_specialist_response(
+            client=client,
+            route_category=route["category"],
+            case=case,
+            prompt_permissions=prompt_permissions,
+            prompt_review_workflow=prompt_review_workflow,
+            prompt_billing=prompt_billing,
+            escalation_response_template=escalation_response_template,
         )
 
-    return {"task_router": task_router, "task_v1": task_v1, "task_v2": task_v2, "task_v3": task_v3}
+    return {"task_router": task_router, "task_v2_routed": task_v2_routed}
+
+
+def run_router_local(client, dataset: list[dict], prompt_router: str) -> pd.DataFrame:
+    categories = sorted({case["category"] for case in dataset})
+    rows = []
+    for case in dataset:
+        route = run_router_structured(client, case["user_input"], prompt_router, categories)
+        predicted = route["category"]
+        rows.append(
+            {
+                "scenario_id": case["scenario_id"],
+                "expected_category": case["category"],
+                "predicted_category": predicted,
+                "exact_match": predicted == case["category"],
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _find_score_column(results_df: pd.DataFrame) -> str | None:
+    preferred = [col for col in results_df.columns if "exact" in col.lower() and "score" in col.lower()]
+    if preferred:
+        return preferred[0]
+    generic = [col for col in results_df.columns if "score" in col.lower()]
+    return generic[0] if generic else None
+
+
+def _find_output_column(results_df: pd.DataFrame) -> str | None:
+    preferred = [
+        col for col in results_df.columns if col.lower() in {"output", "task_output", "experiment_output"}
+    ]
+    if preferred:
+        return preferred[0]
+    generic = [col for col in results_df.columns if "output" in col.lower()]
+    return generic[0] if generic else None
+
+
+def _extract_predicted_category(value):
+    if not isinstance(value, str):
+        return None
+    try:
+        payload = json.loads(value)
+        if isinstance(payload, dict):
+            return payload.get("response_text")
+    except Exception:
+        return value
+    return None
+
+
+def summarize_router_experiment_results(results_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame | None]:
+    score_col = _find_score_column(results_df)
+    summary = pd.DataFrame(
+        [
+            {
+                "rows_evaluated": len(results_df),
+                "score_column": score_col or "not found",
+                "exact_match_accuracy": results_df[score_col].mean() if score_col else None,
+            }
+        ]
+    )
+
+    output_col = _find_output_column(results_df)
+    if not output_col or "category" not in results_df.columns:
+        return summary
+
+    predictions = results_df[["scenario_id", "category", output_col]].copy()
+    predictions["expected_category"] = predictions["category"]
+    predictions["predicted_category"] = predictions[output_col].apply(_extract_predicted_category)
+    predictions["exact_match"] = predictions["expected_category"] == predictions["predicted_category"]
+    return summary
 
 
 def run_experiment(arize_client, dataset_id: str, name_prefix: str, task, evaluators, concurrency: int = 3):
@@ -166,13 +275,12 @@ def run_experiment(arize_client, dataset_id: str, name_prefix: str, task, evalua
 
 def production_readiness_checklist() -> list[tuple[str, str, str]]:
     return [
-        ("correct_outcome improves from v1 to v3", "check experiment comparison", "agents should outperform prompt-only assistance on the same case set"),
-        ("workflow_fit improves from v1 to v3", "check experiment comparison", "each variant should behave like its intended capability stage"),
-        ("tone Good or Acceptable stays high", "check all three variants", "tone is a guardrail, not the main success metric"),
-        ("human review gate before response sent to customer", "not yet designed", "required for v1: agent drafts, human approves"),
-        ("tool-driven actions correspond to real downstream workflows", "stubbed in demo backend", "verify this before any real pilot"),
-        ("sample size is appropriate for the workshop runtime", "configurable via LIMIT_N_CASES", "smaller runs are faster but noisier"),
-        ("threshold to advance from demo to pilot", "not defined", "set based on stable outcome and workflow-fit performance"),
+        ("router exact-match accuracy is stable", "check route experiment", "routing quality should be good before adding specialist autonomy"),
+        ("brand voice remains strong", "check routed copilot experiment", "brand voice is a guardrail, not the primary success metric"),
+        ("helpfulness stays high by category", "check routed copilot experiment", "specialists should answer appropriately for their support category"),
+        ("human escalation is triggered when required", "check code evals", "high-risk or angry cases must hand off safely"),
+        ("billing actions correspond to real workflows", "stubbed in demo backend", "verify this before any real pilot"),
+        ("sample size is appropriate for workshop runtime", "configurable via LIMIT_N_CASES", "smaller runs are faster but noisier"),
     ]
 
 
@@ -190,9 +298,10 @@ def prepare_experiment_bundle(
     arize_space_id: str,
     dataset: list[dict],
     prompt_router: str,
-    prompt_v1: str,
-    prompt_v2: str,
-    prompt_v3: str,
+    prompt_permissions: str,
+    prompt_review_workflow: str,
+    prompt_billing: str,
+    escalation_response_template: str,
     judge_prompts: dict,
     limit_n: int | None = None,
 ) -> dict:
@@ -204,7 +313,15 @@ def prepare_experiment_bundle(
         **arize_bundle,
         "dataset_lookup": dataset_lookup,
         "selected_dataset": selected_dataset,
-        "tasks": build_tasks(client, selected_dataset, prompt_router, prompt_v1, prompt_v2, prompt_v3),
+        "tasks": build_tasks(
+            client,
+            selected_dataset,
+            prompt_router,
+            prompt_permissions,
+            prompt_review_workflow,
+            prompt_billing,
+            escalation_response_template,
+        ),
         "build_evaluators": lambda variant_name: build_evaluators(
             client,
             dataset_lookup,

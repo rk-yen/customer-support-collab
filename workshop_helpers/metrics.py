@@ -4,7 +4,13 @@ import re
 from arize.experiments.evaluators.base import EvaluationResult, Evaluator
 
 LABEL_SCORE = {"Good": 1.0, "Acceptable": 0.5, "Poor": 0.0}
-VARIANT_DISPLAY = {"router": "router", "v1": "v1", "v2": "v2", "v3": "v3"}
+VARIANT_DISPLAY = {
+    "router": "router",
+    "permissions": "permissions",
+    "review_workflow": "review_workflow",
+    "billing": "billing",
+    "v2_routed": "v2_routed",
+}
 
 
 def _parse_judge_response(text: str) -> tuple[str, str]:
@@ -23,18 +29,25 @@ def _parse_task_output(output: str) -> dict:
                 "response_text": payload.get("response_text", ""),
                 "tool_calls": payload.get("tool_calls", []),
                 "action_calls": payload.get("action_calls", []),
+                "metadata": payload.get("metadata", {}),
             }
     except Exception:
         pass
-    return {"response_text": output or "", "tool_calls": [], "action_calls": []}
+    return {"response_text": output or "", "tool_calls": [], "action_calls": [], "metadata": {}}
 
 
-def pack_response_payload(response_text: str, tool_calls: list | None = None, action_calls: list | None = None) -> str:
+def pack_response_payload(
+    response_text: str,
+    tool_calls: list | None = None,
+    action_calls: list | None = None,
+    metadata: dict | None = None,
+) -> str:
     return json.dumps(
         {
             "response_text": response_text,
             "tool_calls": tool_calls or [],
             "action_calls": action_calls or [],
+            "metadata": metadata or {},
         }
     )
 
@@ -52,40 +65,45 @@ def exact_match_result(actual: str | None, expected: str | None) -> tuple[str, s
 
 
 def _variant_expectation(case: dict, variant_name: str) -> str:
-    missing_info_required = case.get("missing_info_required", False)
+    category = case.get("category", "unknown")
     action_expected = case.get("action_expected", False)
     action_type = case.get("action_type", "none")
     workflow_expectation = case.get("workflow_expectation", "unknown")
 
-    if variant_name == "v1":
-        if workflow_expectation == "ask_followup":
-            return "Ask the minimal necessary follow-up question or questions, and avoid bluffing."
-        if action_expected:
-            return (
-                "Do not claim the action was completed. Because this variant only sees the raw customer message, "
-                "a good response may ask the minimal necessary follow-up question or questions, or give a cautious, honest next step "
-                "without pretending backend execution happened."
-            )
+    if variant_name == "permissions":
         return (
-            "Give a helpful, honest best-effort answer using only the customer message. "
-            "Do not pretend to have backend access, and do not penalize reasonable minimal clarifying questions."
+            "Prompt-only permissions specialist. Give a concise access path, explain who can grant access, "
+            "and do not invent backend changes or approvals."
         )
 
-    if variant_name == "v2":
-        if action_expected:
-            return (
-                f"Use the provided context to explain the right next step for `{action_type}`, "
-                "but do not claim the backend action already happened."
-            )
-        if missing_info_required:
-            return "Ask only for the missing information that is still needed after using the provided context."
-        return "Use the provided context specifically and give the user a clear next step."
+    if variant_name == "review_workflow":
+        return (
+            "Context-aware workflow specialist. Use the provided workflow state and blockers specifically. "
+            "Do not invent missing review steps."
+        )
 
+    if variant_name == "billing":
+        if action_expected:
+            return f"Tool-using billing specialist. Use tools to verify the account and complete `{action_type}` before replying."
+        return "Tool-using billing specialist. Use tools to verify account and invoice details before explaining the bill."
+
+    if variant_name == "v2_routed":
+        if category == "permissions":
+            return "Two-stage copilot. Route to permissions, then answer as a prompt-only permissions specialist."
+        if category == "review_workflow":
+            return "Two-stage copilot. Route to review_workflow, then use provided workflow context to answer."
+        if category == "billing":
+            if action_expected:
+                return f"Two-stage copilot. Route to billing, use tools, and complete `{action_type}` before replying."
+            return "Two-stage copilot. Route to billing and verify account or invoice facts with tools before replying."
+        if category == "escalation":
+            return "Two-stage copilot. Route to escalation, hand the case to a human, and clearly communicate the handoff."
+
+    if workflow_expectation == "escalate":
+        return "Escalate the case to a human promptly."
     if action_expected:
-        return f"Use tools to complete `{action_type}` and confirm the action result in the final response."
-    if missing_info_required:
-        return "Use tools to verify what you can first, then ask only if something is still missing."
-    return "Use tools when helpful and answer the user directly with verified information."
+        return f"Complete `{action_type}` before replying."
+    return "Answer the user directly and stay grounded in the available context."
 
 
 def _judge_with_reasoning(client, system_prompt: str, user_prompt: str) -> tuple[str, str]:
@@ -96,23 +114,23 @@ def _judge_with_reasoning(client, system_prompt: str, user_prompt: str) -> tuple
             {"role": "user", "content": user_prompt},
         ],
         temperature=0,
-        max_tokens=120,
+        max_tokens=140,
     )
     content = response.choices[0].message.content.strip()
     return _parse_judge_response(content)
 
 
-def judge_tone(client, output: str, judge_prompts: dict) -> tuple[str, str]:
+def judge_brand_voice(client, output: str, judge_prompts: dict) -> tuple[str, str]:
     payload = _parse_task_output(output)
-    return _judge_with_reasoning(client, judge_prompts["tone"], f"Response:\n{payload['response_text']}")
+    return _judge_with_reasoning(client, judge_prompts["brand_voice"], f"Response:\n{payload['response_text']}")
 
 
-def judge_outcome(client, output: str, case: dict, judge_prompts: dict) -> tuple[str, str]:
+def judge_helpfulness(client, output: str, case: dict, judge_prompts: dict) -> tuple[str, str]:
     payload = _parse_task_output(output)
     return _judge_with_reasoning(
         client,
-        judge_prompts["outcome_system"],
-        judge_prompts["outcome"].format(
+        judge_prompts["helpfulness_system"],
+        judge_prompts["helpfulness"].format(
             user_input=case.get("user_input", ""),
             ideal=case.get("expected_output", ""),
             actual=payload["response_text"],
@@ -131,6 +149,7 @@ def judge_workflow_fit(
     payload = _parse_task_output(output)
     tool_calls = payload["tool_calls"]
     action_calls = payload["action_calls"]
+    route_category = payload["metadata"].get("route_category", "")
     tool_summary = "; ".join(
         (
             f"{call.get('name', 'unknown')}({call.get('arguments', '')})"
@@ -153,6 +172,8 @@ def judge_workflow_fit(
         judge_prompts["workflow"].format(
             variant_name=variant_name,
             variant_behavior=variant_behavior,
+            case_category=case.get("category", "unknown"),
+            routed_category=route_category or "not recorded",
             variant_expectation=_variant_expectation(case, variant_name),
             workflow_expectation=case.get("workflow_expectation", "unknown"),
             missing_info_required=case.get("missing_info_required", False),
@@ -175,15 +196,41 @@ def _action_match_score(case: dict, output: str) -> tuple[str, str] | None:
         call_name = call.get("name") if isinstance(call, dict) else str(call)
         if expected_action and call_name == expected_action:
             arguments = call.get("arguments", "") if isinstance(call, dict) else ""
-            return "Good", f"Recorded action tool `{expected_action}` was called with arguments: {arguments}"
+            return "Good", f"Recorded action `{expected_action}` was called with arguments: {arguments}"
     if action_calls:
         called_names = ", ".join(
             call.get("name", str(call)) if isinstance(call, dict) else str(call) for call in action_calls
         )
         return "Acceptable", (
-            f"Recorded action tool calls were `{called_names}`, but none matched expected action `{expected_action}`."
+            f"Recorded action calls were `{called_names}`, but none matched expected action `{expected_action}`."
         )
-    return "Poor", f"No recorded action tool call matched expected action `{expected_action}`."
+    return "Poor", f"No recorded action call matched expected action `{expected_action}`."
+
+
+def _did_escalate(case: dict, output: str) -> tuple[bool, str]:
+    payload = _parse_task_output(output)
+    action_calls = payload["action_calls"]
+    routed_category = payload["metadata"].get("route_category", "")
+    expected_action = case.get("action_type")
+
+    for call in action_calls:
+        call_name = call.get("name") if isinstance(call, dict) else str(call)
+        if call_name == "escalate_to_human":
+            arguments = call.get("arguments", "") if isinstance(call, dict) else ""
+            return True, f"Recorded `escalate_to_human` action call with arguments: {arguments}"
+
+    if routed_category == "escalation" and expected_action == "escalate_to_human":
+        return True, "Route category was `escalation` for a case that requires human handoff."
+
+    return False, "No recorded `escalate_to_human` action call was found."
+
+
+def escalation_decision_result(case: dict, output: str) -> tuple[str, str]:
+    expected = case.get("action_type") == "escalate_to_human"
+    predicted, evidence = _did_escalate(case, output)
+    if expected == predicted:
+        return "Good", f"Escalation decision matched expectation. {evidence}"
+    return "Poor", f"Expected escalate={expected}, predicted escalate={predicted}. {evidence}"
 
 
 def composite_score(scores: list[float]) -> float:
@@ -212,7 +259,8 @@ def score_single_response(
     variant_behavior: str,
     judge_prompts: dict,
 ) -> dict:
-    tone_label, tone_reasoning = judge_tone(client, output, judge_prompts=judge_prompts)
+    brand_voice_label, brand_voice_reasoning = judge_brand_voice(client, output, judge_prompts=judge_prompts)
+    helpfulness_label, helpfulness_reasoning = judge_helpfulness(client, output, case, judge_prompts=judge_prompts)
     workflow_label, workflow_reasoning = judge_workflow_fit(
         client,
         output,
@@ -223,25 +271,25 @@ def score_single_response(
     )
 
     row = {
-        "tone": tone_label,
-        "tone_reasoning": tone_reasoning,
+        "brand_voice": brand_voice_label,
+        "brand_voice_reasoning": brand_voice_reasoning,
+        "helpfulness": helpfulness_label,
+        "helpfulness_reasoning": helpfulness_reasoning,
         "workflow_fit": workflow_label,
         "workflow_reasoning": workflow_reasoning,
-        "correct_outcome": "N/A" if variant_name == "v1" else "",
-        "outcome_reasoning": "" if variant_name == "v1" else "",
     }
 
-    scores = [LABEL_SCORE.get(tone_label, 0.0), LABEL_SCORE.get(workflow_label, 0.0)]
+    scores = [
+        LABEL_SCORE.get(brand_voice_label, 0.0),
+        LABEL_SCORE.get(helpfulness_label, 0.0),
+        LABEL_SCORE.get(workflow_label, 0.0),
+    ]
 
-    if variant_name != "v1":
-        outcome_label, outcome_reasoning = judge_outcome(client, output, case, judge_prompts=judge_prompts)
-        row["correct_outcome"] = outcome_label
-        row["outcome_reasoning"] = outcome_reasoning
-        scores.append(LABEL_SCORE.get(outcome_label, 0.0))
-    action_check = _action_match_score(case, output) if variant_name == "v3" else None
+    action_check = _action_match_score(case, output) if variant_name in {"billing", "v2_routed"} else None
     if action_check:
         row["action_execution"] = action_check[0]
         row["action_reasoning"] = action_check[1]
+        scores.append(LABEL_SCORE.get(action_check[0], 0.0))
     else:
         row["action_execution"] = ""
         row["action_reasoning"] = ""
@@ -289,17 +337,17 @@ class ExactMatchEvaluator(Evaluator):
         return EvaluationResult(score=LABEL_SCORE.get(label, 0.0), label=label, explanation=reasoning)
 
 
-class ToneQualityEvaluator(Evaluator):
+class BrandVoiceEvaluator(Evaluator):
     def __init__(self, client, judge_prompts: dict):
         self.client = client
         self.judge_prompts = judge_prompts
 
     def evaluate(self, dataset_row, input, output, **kwargs) -> EvaluationResult:
-        label, reasoning = judge_tone(self.client, output or "", judge_prompts=self.judge_prompts)
+        label, reasoning = judge_brand_voice(self.client, output or "", judge_prompts=self.judge_prompts)
         return EvaluationResult(score=LABEL_SCORE.get(label, 0.0), label=label, explanation=reasoning)
 
 
-class CorrectOutcomeEvaluator(Evaluator):
+class HelpfulnessEvaluator(Evaluator):
     def __init__(self, client, dataset_by_id: dict, judge_prompts: dict):
         self.client = client
         self.dataset_by_id = dataset_by_id
@@ -307,7 +355,7 @@ class CorrectOutcomeEvaluator(Evaluator):
 
     def evaluate(self, dataset_row, input, output, **kwargs) -> EvaluationResult:
         case = self.dataset_by_id.get(dataset_row.get("scenario_id"), {})
-        label, reasoning = judge_outcome(self.client, output or "", case, judge_prompts=self.judge_prompts)
+        label, reasoning = judge_helpfulness(self.client, output or "", case, judge_prompts=self.judge_prompts)
         return EvaluationResult(score=LABEL_SCORE.get(label, 0.0), label=label, explanation=reasoning)
 
 
@@ -352,6 +400,16 @@ class ActionExecutionEvaluator(Evaluator):
         return EvaluationResult(score=LABEL_SCORE.get(label, 0.0), label=label, explanation=reasoning)
 
 
+class EscalationDecisionEvaluator(Evaluator):
+    def __init__(self, dataset_by_id: dict):
+        self.dataset_by_id = dataset_by_id
+
+    def evaluate(self, dataset_row, input, output, **kwargs) -> EvaluationResult:
+        case = self.dataset_by_id.get(dataset_row.get("scenario_id"), {})
+        label, reasoning = escalation_decision_result(case, output or "")
+        return EvaluationResult(score=LABEL_SCORE.get(label, 0.0), label=label, explanation=reasoning)
+
+
 def build_evaluators(
     client,
     dataset_by_id: dict,
@@ -363,17 +421,11 @@ def build_evaluators(
         return [ExactMatchEvaluator(expected_field="category")]
 
     evaluators: list[Evaluator] = [
-        ToneQualityEvaluator(client, judge_prompts=judge_prompts),
-        WorkflowFitEvaluator(
-            client,
-            dataset_by_id,
-            variant_name=variant_name,
-            variant_behavior=variant_behavior,
-            judge_prompts=judge_prompts,
-        ),
+        BrandVoiceEvaluator(client, judge_prompts=judge_prompts),
+        HelpfulnessEvaluator(client, dataset_by_id, judge_prompts=judge_prompts),
     ]
-    if variant_name != "v1":
-        evaluators.insert(1, CorrectOutcomeEvaluator(client, dataset_by_id, judge_prompts=judge_prompts))
-    if variant_name == "v3":
+    if variant_name == "billing":
         evaluators.append(ActionExecutionEvaluator(dataset_by_id))
+    if variant_name == "v2_routed":
+        evaluators.append(EscalationDecisionEvaluator(dataset_by_id))
     return evaluators
