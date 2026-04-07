@@ -216,31 +216,9 @@ def _find_score_column(results_df: pd.DataFrame) -> str | None:
     return generic[0] if generic else None
 
 
-def _find_output_column(results_df: pd.DataFrame) -> str | None:
-    preferred = [
-        col for col in results_df.columns if col.lower() in {"output", "task_output", "experiment_output"}
-    ]
-    if preferred:
-        return preferred[0]
-    generic = [col for col in results_df.columns if "output" in col.lower()]
-    return generic[0] if generic else None
-
-
-def _extract_predicted_category(value):
-    if not isinstance(value, str):
-        return None
-    try:
-        payload = json.loads(value)
-        if isinstance(payload, dict):
-            return payload.get("response_text")
-    except Exception:
-        return value
-    return None
-
-
-def summarize_router_experiment_results(results_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame | None]:
+def summarize_router_experiment_results(results_df: pd.DataFrame) -> pd.DataFrame:
     score_col = _find_score_column(results_df)
-    summary = pd.DataFrame(
+    return pd.DataFrame(
         [
             {
                 "rows_evaluated": len(results_df),
@@ -250,18 +228,28 @@ def summarize_router_experiment_results(results_df: pd.DataFrame) -> tuple[pd.Da
         ]
     )
 
-    output_col = _find_output_column(results_df)
-    if not output_col or "category" not in results_df.columns:
-        return summary
 
-    predictions = results_df[["scenario_id", "category", output_col]].copy()
-    predictions["expected_category"] = predictions["category"]
-    predictions["predicted_category"] = predictions[output_col].apply(_extract_predicted_category)
-    predictions["exact_match"] = predictions["expected_category"] == predictions["predicted_category"]
-    return summary
+def summarize_experiment_scores(results_df: pd.DataFrame) -> pd.DataFrame:
+    score_columns = [col for col in results_df.columns if "score" in col.lower()]
+    if not score_columns:
+        return pd.DataFrame(
+            [
+                {
+                    "rows_evaluated": len(results_df),
+                    "status": "No score columns found in the experiment results DataFrame.",
+                }
+            ]
+        )
+
+    summary = {"rows_evaluated": len(results_df)}
+    for column in score_columns:
+        numeric = pd.to_numeric(results_df[column], errors="coerce")
+        if numeric.notna().any():
+            summary[column] = numeric.mean()
+    return pd.DataFrame([summary])
 
 
-def run_experiment(arize_client, dataset_id: str, name_prefix: str, task, evaluators, concurrency: int = 3):
+def run_experiment(arize_client, dataset_id: str, name_prefix: str, task, evaluators, concurrency: int = 1):
     experiment_name = f"{name_prefix}-{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
     experiment, results_df = arize_client.experiments.run(
         name=experiment_name,
