@@ -65,16 +65,16 @@ def exact_match_result(actual: str | None, expected: str | None) -> tuple[str, s
 
 
 def _judge_with_reasoning(client, system_prompt: str, user_prompt: str) -> tuple[str, str]:
-    response = client.chat.completions.create(
+    response = client.responses.create(
         model="gpt-4o",
-        messages=[
+        input=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
         temperature=0,
-        max_tokens=140,
+        max_output_tokens=140,
     )
-    content = response.choices[0].message.content.strip()
+    content = response.output_text.strip()
     return _parse_judge_response(content)
 
 
