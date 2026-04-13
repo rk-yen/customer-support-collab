@@ -5,6 +5,8 @@ from pathlib import Path
 
 from agents import Agent, Runner, function_tool
 
+from workshop_helpers.setup import suspend_openai_tracing_for_agents
+
 _BILLING_REFERENCE_PATH = Path(__file__).with_name("billing_reference.json")
 
 BILLING_ACCOUNT_DB: dict[str, dict] = {}
@@ -118,13 +120,14 @@ def run_billing_agent(
     model: str = "gpt-4o-mini",
     instructions: str | None = None,
 ) -> dict:
-    result = asyncio.run(
-        run_billing_agent_async(
-            customer_message=customer_message,
-            model=model,
-            instructions=instructions,
+    with suspend_openai_tracing_for_agents():
+        result = asyncio.run(
+            run_billing_agent_async(
+                customer_message=customer_message,
+                model=model,
+                instructions=instructions,
+            )
         )
-    )
     tool_calls = []
     action_calls = []
     for item in result.new_items:

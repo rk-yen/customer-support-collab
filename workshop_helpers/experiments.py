@@ -292,11 +292,23 @@ def prepare_experiment_bundle(
     escalation_response_template: str,
     judge_prompts: dict,
     limit_n: int | None = None,
+    arize_client=None,
+    dataset_id: str | None = None,
 ) -> dict:
     selected_dataset = select_cases(dataset, limit_n=limit_n)
     hydrate_backend_from_dataset(dataset)
     dataset_lookup = dataset_index(selected_dataset)
-    arize_bundle = ensure_arize_dataset(arize_api_key, arize_space_id, selected_dataset)
+    if arize_client is not None and dataset_id is not None:
+        arize_bundle = {
+            "client": arize_client,
+            "dataset_id": dataset_id,
+            "dataset_name": DATASET_NAME,
+            "row_count": len(selected_dataset),
+            "created": False,
+            "dataframe": build_arize_dataframe(selected_dataset),
+        }
+    else:
+        arize_bundle = ensure_arize_dataset(arize_api_key, arize_space_id, selected_dataset)
     return {
         **arize_bundle,
         "dataset_lookup": dataset_lookup,
